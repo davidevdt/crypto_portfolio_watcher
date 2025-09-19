@@ -421,7 +421,12 @@ def show_dca_out_strategy(asset, current_price: float):
                 )
 
             df_preview = pd.DataFrame(preview_data)
-            st.dataframe(df_preview, width="stretch")
+            styled_preview = df_preview.style.set_table_styles(
+                [
+                    {"selector": "th", "props": [("text-align", "center")]},
+                    {"selector": "td", "props": [("text-align", "center")]},
+                ]
+            )
 
             # Show total expected profit with color
             if total_expected_profit > 0:

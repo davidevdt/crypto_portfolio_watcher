@@ -820,16 +820,18 @@ def calculate_signal_summary(
 def is_price_below_all_smas(row) -> bool:
     """Check if price is below all SMA columns in the row."""
     try:
-        current_price = float(row["Price"].replace("$", "").replace(",", ""))
+        current_price = float(row["Price ($)"])
         sma_columns = [
-            col for col in row.index if col.startswith("SMA(") and row[col] != "N/A"
+            col
+            for col in row.index
+            if col.startswith("SMA(") and row[col] is not None and not pd.isna(row[col])
         ]
 
         if len(sma_columns) < 2:  # Need at least 2 SMAs
             return False
 
         for col in sma_columns:
-            sma_value = float(row[col].replace("$", "").replace(",", ""))
+            sma_value = float(row[col])
             if current_price >= sma_value:
                 return False
         return True
@@ -840,16 +842,18 @@ def is_price_below_all_smas(row) -> bool:
 def is_price_above_all_smas(row) -> bool:
     """Check if price is above all SMA columns in the row."""
     try:
-        current_price = float(row["Price"].replace("$", "").replace(",", ""))
+        current_price = float(row["Price ($)"])
         sma_columns = [
-            col for col in row.index if col.startswith("SMA(") and row[col] != "N/A"
+            col
+            for col in row.index
+            if col.startswith("SMA(") and row[col] is not None and not pd.isna(row[col])
         ]
 
         if len(sma_columns) < 2:  # Need at least 2 SMAs
             return False
 
         for col in sma_columns:
-            sma_value = float(row[col].replace("$", "").replace(",", ""))
+            sma_value = float(row[col])
             if current_price <= sma_value:
                 return False
         return True
@@ -860,16 +864,18 @@ def is_price_above_all_smas(row) -> bool:
 def is_price_below_all_emas(row) -> bool:
     """Check if price is below all EMA columns in the row."""
     try:
-        current_price = float(row["Price"].replace("$", "").replace(",", ""))
+        current_price = float(row["Price ($)"])
         ema_columns = [
-            col for col in row.index if col.startswith("EMA(") and row[col] != "N/A"
+            col
+            for col in row.index
+            if col.startswith("EMA(") and row[col] is not None and not pd.isna(row[col])
         ]
 
         if len(ema_columns) < 2:  # Need at least 2 EMAs
             return False
 
         for col in ema_columns:
-            ema_value = float(row[col].replace("$", "").replace(",", ""))
+            ema_value = float(row[col])
             if current_price >= ema_value:
                 return False
         return True
@@ -880,16 +886,18 @@ def is_price_below_all_emas(row) -> bool:
 def is_price_above_all_emas(row) -> bool:
     """Check if price is above all EMA columns in the row."""
     try:
-        current_price = float(row["Price"].replace("$", "").replace(",", ""))
+        current_price = float(row["Price ($)"])
         ema_columns = [
-            col for col in row.index if col.startswith("EMA(") and row[col] != "N/A"
+            col
+            for col in row.index
+            if col.startswith("EMA(") and row[col] is not None and not pd.isna(row[col])
         ]
 
         if len(ema_columns) < 2:  # Need at least 2 EMAs
             return False
 
         for col in ema_columns:
-            ema_value = float(row[col].replace("$", "").replace(",", ""))
+            ema_value = float(row[col])
             if current_price <= ema_value:
                 return False
         return True
@@ -1106,34 +1114,26 @@ def create_monitoring_dataframe(df: pd.DataFrame, monitoring_interval: str = "1d
         display_data.append(
             {
                 "Asset": symbol,
-                "Price": (
-                    format_currency(current_price, 4)
-                    if not np.isnan(current_price)
-                    else "N/A"
+                "Price ($)": current_price if not np.isnan(current_price) else None,
+                f"RSI({rsi_periods})": rsi if not np.isnan(rsi) else None,
+                f"SMA({sma_short_periods}) ($)": (
+                    sma_short if not np.isnan(sma_short) else None
                 ),
-                f"RSI({rsi_periods})": f"{rsi:.1f}" if not np.isnan(rsi) else "N/A",
-                f"SMA({sma_short_periods})": (
-                    format_currency(sma_short, 4) if not np.isnan(sma_short) else "N/A"
+                f"SMA({sma_medium_periods}) ($)": (
+                    sma_medium if not np.isnan(sma_medium) else None
                 ),
-                f"SMA({sma_medium_periods})": (
-                    format_currency(sma_medium, 4)
-                    if not np.isnan(sma_medium)
-                    else "N/A"
+                f"SMA({sma_long_periods}) ($)": (
+                    sma_long if not np.isnan(sma_long) else None
                 ),
-                f"SMA({sma_long_periods})": (
-                    format_currency(sma_long, 4) if not np.isnan(sma_long) else "N/A"
+                f"EMA({ema_short_periods}) ($)": (
+                    ema_short if not np.isnan(ema_short) else None
                 ),
-                f"EMA({ema_short_periods})": (
-                    format_currency(ema_short, 4) if not np.isnan(ema_short) else "N/A"
-                ),
-                f"EMA({ema_medium_periods})": (
-                    format_currency(ema_medium, 4)
-                    if not np.isnan(ema_medium)
-                    else "N/A"
+                f"EMA({ema_medium_periods}) ($)": (
+                    ema_medium if not np.isnan(ema_medium) else None
                 ),
                 f"Vol({vol_short_periods},{vol_long_periods})": f"{vol_emoji} {vol_regime}",
                 f"MACD({macd_fast_periods},{macd_slow_periods},{macd_signal_periods})": (
-                    f"{macd:.6f}" if not np.isnan(macd) else "N/A"
+                    macd if not np.isnan(macd) else None
                 ),
                 "Signal": signal,
             }
@@ -1145,13 +1145,17 @@ def create_monitoring_dataframe(df: pd.DataFrame, monitoring_interval: str = "1d
     def highlight_cells(row):
         styles = pd.Series([""] * len(row), index=row.index)
 
-        if row["Price"] != "N/A":
+        if row["Price ($)"] is not None and not pd.isna(row["Price ($)"]):
             try:
-                current_price = float(row["Price"].replace("$", "").replace(",", ""))
+                current_price = float(row["Price ($)"])
 
                 # Style RSI column (find RSI column dynamically) with bubble indicators
                 for col_name in row.index:
-                    if col_name.startswith("RSI(") and row[col_name] != "N/A":
+                    if (
+                        col_name.startswith("RSI(")
+                        and row[col_name] is not None
+                        and not pd.isna(row[col_name])
+                    ):
                         try:
                             rsi_value = float(row[col_name])
                             if rsi_value >= 70:
@@ -1170,12 +1174,12 @@ def create_monitoring_dataframe(df: pd.DataFrame, monitoring_interval: str = "1d
                 # Style SMA/EMA columns dynamically with bubble notifications
                 for col_name in row.index:
                     if (
-                        col_name.startswith("SMA(") or col_name.startswith("EMA(")
-                    ) and row[col_name] != "N/A":
+                        (col_name.startswith("SMA(") or col_name.startswith("EMA("))
+                        and row[col_name] is not None
+                        and not pd.isna(row[col_name])
+                    ):
                         try:
-                            indicator_value = float(
-                                row[col_name].replace("$", "").replace(",", "")
-                            )
+                            indicator_value = float(row[col_name])
                             if current_price < indicator_value:
                                 # Check if this indicates oversold condition (price below all SMAs/EMAs)
                                 if col_name.startswith(
@@ -1225,7 +1229,11 @@ def create_monitoring_dataframe(df: pd.DataFrame, monitoring_interval: str = "1d
 
         # Style MACD columns dynamically
         for col_name in row.index:
-            if col_name.startswith("MACD(") and row[col_name] != "N/A":
+            if (
+                col_name.startswith("MACD(")
+                and row[col_name] is not None
+                and not pd.isna(row[col_name])
+            ):
                 try:
                     macd_value = float(row[col_name])
                     if macd_value > 0:

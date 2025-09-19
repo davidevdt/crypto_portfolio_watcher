@@ -1237,16 +1237,18 @@ def show_portfolio_assets_table(
             {
                 "Symbol": symbol,
                 "Portfolio": portfolio_name,
-                "Current Price": format_smart_currency(current_price),
+                "Current Price ($)": current_price,
                 "Quantity": format_smart_quantity(quantity),
-                "Avg Buy Price": format_smart_currency(average_buy_price),
-                "Total Value": f"${current_value:,.2f}",  # NEW: Current Price * Quantity
-                "Total Spent": f"${quantity * average_buy_price:,.2f}",  # NEW: Average Buy Price * Quantity
-                "Current Allocation %": f"{current_allocation:.1f}%",
-                "Initial Allocation %": f"{initial_allocation:.1f}%",
-                "24h Change": f"${change_24h_dollar:+,.2f} ({change_24h_pct:+.2f}%)",
-                "P&L": f"${pnl:,.2f}",
-                "P&L %": format_percentage(pnl_pct),
+                "Avg Buy Price ($)": average_buy_price,
+                "Total Value ($)": current_value,  # NEW: Current Price * Quantity
+                "Total Spent ($)": quantity
+                * average_buy_price,  # NEW: Average Buy Price * Quantity
+                "Current Allocation (%)": current_allocation,
+                "Initial Allocation (%)": initial_allocation,
+                "24h Change ($)": change_24h_dollar,
+                "24h Change (%)": change_24h_pct,
+                "P&L ($)": pnl,
+                "P&L (%)": pnl_pct,
             }
         )
 
@@ -1254,25 +1256,23 @@ def show_portfolio_assets_table(
 
     # Style the dataframe
     def style_pnl(val):
-        if isinstance(val, str):
-            if val.startswith("+") or (
-                val.startswith("$") and not val.startswith("$-")
-            ):
+        if isinstance(val, (int, float)):
+            if val > 0:
                 return "color: #28a745"
-            elif val.startswith("-") or val.startswith("$-"):
+            elif val < 0:
                 return "color: #dc3545"
         return ""
 
     def style_24h_change(val):
-        if isinstance(val, str) and "(" in val:
-            if "+" in val:
+        if isinstance(val, (int, float)):
+            if val > 0:
                 return "color: #28a745"
-            elif "-" in val:
+            elif val < 0:
                 return "color: #dc3545"
         return ""
 
-    styled_df = df.style.map(style_pnl, subset=["P&L", "P&L %"]).map(
-        style_24h_change, subset=["24h Change"]
+    styled_df = df.style.map(style_pnl, subset=["P&L ($)", "P&L (%)"]).map(
+        style_24h_change, subset=["24h Change ($)", "24h Change (%)"]
     )
     st.dataframe(styled_df, width="stretch")
 
@@ -1400,20 +1400,6 @@ def show_allocation_charts(assets: List, _: Dict, use_aggregated: bool = False):
     )
 
     with col1:
-        # Current allocation chart
-        fig_current = create_portfolio_allocation_chart(
-            [
-                {
-                    "Symbol": item["Symbol"],
-                    "Current Value": f"${item['Current Value']:,.2f}",
-                }
-                for item in current_data
-            ],
-            current_title,
-        )
-        st.plotly_chart(fig_current, width="stretch")
-
-    with col2:
         # Initial allocation chart
         fig_initial = create_portfolio_allocation_chart(
             [
@@ -1426,6 +1412,20 @@ def show_allocation_charts(assets: List, _: Dict, use_aggregated: bool = False):
             initial_title,
         )
         st.plotly_chart(fig_initial, width="stretch")
+
+    with col2:
+        # Current allocation chart
+        fig_current = create_portfolio_allocation_chart(
+            [
+                {
+                    "Symbol": item["Symbol"],
+                    "Current Value": f"${item['Current Value']:,.2f}",
+                }
+                for item in current_data
+            ],
+            current_title,
+        )
+        st.plotly_chart(fig_current, width="stretch")
 
 
 def show_performance_bar_charts(assets: List, use_aggregated: bool = False):
@@ -2660,13 +2660,14 @@ def show_portfolios_summary_table(consistent_prices: Dict):
         portfolios_data.append(
             {
                 "Portfolio": portfolio.name,
-                "Total Value": f"${total_value:,.2f}",
-                "Total Spent": f"${total_spent:,.2f}",
-                "Current Allocation %": f"{current_allocation:.1f}%",
-                "Initial Allocation %": f"{initial_allocation:.1f}%",
-                "24h Change": f"${change_24h_dollar:+,.2f} ({change_24h_pct:+.2f}%)",
-                "P&L": f"${pnl:,.2f}",
-                "P&L %": format_percentage(pnl_pct),
+                "Total Value ($)": total_value,
+                "Total Spent ($)": total_spent,
+                "Current Allocation (%)": current_allocation,
+                "Initial Allocation (%)": initial_allocation,
+                "24h Change ($)": change_24h_dollar,
+                "24h Change (%)": change_24h_pct,
+                "P&L ($)": pnl,
+                "P&L (%)": pnl_pct,
             }
         )
 
@@ -2674,25 +2675,23 @@ def show_portfolios_summary_table(consistent_prices: Dict):
 
     # Style the dataframe similar to portfolio assets table
     def style_pnl(val):
-        if isinstance(val, str):
-            if val.startswith("+") or (
-                val.startswith("$") and not val.startswith("$-")
-            ):
+        if isinstance(val, (int, float)):
+            if val > 0:
                 return "color: #28a745"
-            elif val.startswith("-") or val.startswith("$-"):
+            elif val < 0:
                 return "color: #dc3545"
         return ""
 
     def style_24h_change(val):
-        if isinstance(val, str) and "(" in val:
-            if "+" in val:
+        if isinstance(val, (int, float)):
+            if val > 0:
                 return "color: #28a745"
-            elif "-" in val:
+            elif val < 0:
                 return "color: #dc3545"
         return ""
 
-    styled_df = df.style.map(style_pnl, subset=["P&L", "P&L %"]).map(
-        style_24h_change, subset=["24h Change"]
+    styled_df = df.style.map(style_pnl, subset=["P&L ($)", "P&L (%)"]).map(
+        style_24h_change, subset=["24h Change ($)", "24h Change (%)"]
     )
     st.dataframe(styled_df, width="stretch")
 
@@ -2753,16 +2752,16 @@ def show_portfolio_charts(consistent_prices: Dict):
     col1, col2 = st.columns(2)
 
     with col1:
-        fig_current = create_portfolio_allocation_chart(
-            portfolio_current_allocation_data, "Current Allocation"
-        )
-        st.plotly_chart(fig_current, width="stretch")
-
-    with col2:
         fig_initial = create_portfolio_allocation_chart(
             portfolio_initial_allocation_data, "Initial Allocation"
         )
         st.plotly_chart(fig_initial, width="stretch")
+
+    with col2:
+        fig_current = create_portfolio_allocation_chart(
+            portfolio_current_allocation_data, "Current Allocation"
+        )
+        st.plotly_chart(fig_current, width="stretch")
 
     # Second row: Portfolio performance bar charts
     st.subheader("Portfolio Performance")
