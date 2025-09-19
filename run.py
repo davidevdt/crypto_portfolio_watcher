@@ -25,8 +25,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class EnhancedAppRunner:
-    """Enhanced app runner with background services."""
+class AppRunner:
+    """App runner with background services."""
 
     def __init__(self):
         self.background_task = None
@@ -185,7 +185,7 @@ class EnhancedAppRunner:
             signal.signal(signal.SIGINT, self.signal_handler)
             signal.signal(signal.SIGTERM, self.signal_handler)
 
-            logger.info("🚀 Starting Crypto Portfolio Tracker with Enhanced Features")
+            logger.info("🚀 Starting Crypto Portfolio Tracker")
             logger.info("=" * 60)
 
             self.background_thread = threading.Thread(
@@ -214,7 +214,7 @@ class EnhancedAppRunner:
 
 def main():
     """Main entry point."""
-    logger.info("🔧 Crypto Portfolio Tracker - Enhanced Edition")
+    logger.info("🔧 Crypto Portfolio Tracker")
     logger.info("=" * 50)
     logger.info("Features:")
     logger.info("✅ Modular page-based architecture")
@@ -229,7 +229,7 @@ def main():
     logger.info("⏳ Starting services... Please wait...")
     logger.info("=" * 50)
 
-    runner = EnhancedAppRunner()
+    runner = AppRunner()
     runner.run()
 
 
