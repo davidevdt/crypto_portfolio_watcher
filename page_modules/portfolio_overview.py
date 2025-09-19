@@ -163,8 +163,9 @@ def show():
 
         init_session_state()
 
-    # Portfolio selector at the top
-    selected_portfolio = portfolio_selector()
+    # Portfolio selector is now handled in the main app navigation for this page
+    # Get the current selected portfolio from session state
+    selected_portfolio = st.session_state.get("selected_portfolio", "all")
 
     if selected_portfolio is None:
         st.markdown("---")

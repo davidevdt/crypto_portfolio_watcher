@@ -851,8 +851,8 @@ def send_whatsapp_notification(message: str, phone_number: str):
 
 
 # Portfolio selector component
-def portfolio_selector():
-    """Portfolio selector component to be placed at the top of pages."""
+def portfolio_selector(use_sidebar=False):
+    """Portfolio selector component to be placed at the top of pages or in sidebar."""
     # Cache portfolios to avoid repeated DB queries
     cache_key = "portfolio_selector_cache"
     if cache_key not in st.session_state or not st.session_state.get(cache_key):
@@ -875,7 +875,10 @@ def portfolio_selector():
                 current_index = i
                 break
 
-        selected = st.selectbox(
+        # Use sidebar or main area based on parameter
+        container = st.sidebar if use_sidebar else st
+
+        selected = container.selectbox(
             "📁 Select Portfolio",
             options=list(portfolio_options.keys()),
             index=current_index,
