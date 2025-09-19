@@ -81,7 +81,14 @@ def get_historical_data_from_db(
                                 )
                                 else float(price.price)
                             ),
-                            "close": float(price.price),
+                            "close": (
+                                float(price.close_price)
+                                if (
+                                    hasattr(price, "close_price")
+                                    and price.close_price is not None
+                                )
+                                else float(price.price)
+                            ),
                             "volume": float(price.volume) if price.volume else 0,
                         }
                     )
@@ -197,55 +204,41 @@ def get_historical_data_from_db(
 
             session.close()
 
-            if historical_prices: 
-                # Convert to expected format with proper OHLC data generation
+            if historical_prices:
+                # Convert to expected format using real OHLC data from database
                 data = []
 
-                for i, price in enumerate(historical_prices):
-                    close_price = float(price.price)
+                for price in historical_prices:
+                    # Use real OHLC data if available, with smart fallback handling
+                    if (
+                        hasattr(price, "open_price")
+                        and price.open_price is not None
+                        and hasattr(price, "high_price")
+                        and price.high_price is not None
+                        and hasattr(price, "low_price")
+                        and price.low_price is not None
+                    ):
+                        # We have OHL data, now get close price
+                        open_price = float(price.open_price)
+                        high_price = float(price.high_price)
+                        low_price = float(price.low_price)
 
-                    # For realistic OHLC, use close price as the base and create logical OHLC
-                    # Use previous close as open for next candle (proper continuation)
-                    if i == 0:
-                        # For first candle, assume open slightly below/above close
-                        open_price = close_price * (0.998 if close_price > 0 else 1.002)
+                        # For close, prefer close_price but fallback to legacy price field
+                        if (
+                            hasattr(price, "close_price")
+                            and price.close_price is not None
+                        ):
+                            close_price = float(price.close_price)
+                        else:
+                            close_price = float(
+                                price.price
+                            )  # Use legacy price field as close
                     else:
-                        # Use previous close as current open (continuous price action)
-                        open_price = data[i - 1]["close"]
-
-                    # Generate high and low based on realistic intraday ranges
-                    # Typical crypto daily range is 2-8% from close price
-                    if interval == "1d":  # Daily timeframe
-                        range_pct = (
-                            0.02 + (hash(str(price.date)) % 6) * 0.01
-                        )  # 2-8% range
-                    elif interval in ["1h", "4h"]:  # Hourly timeframes
-                        range_pct = (
-                            0.005 + (hash(str(price.date)) % 3) * 0.005
-                        )  # 0.5-2% range
-                    else:  # Weekly/other
-                        range_pct = (
-                            0.03 + (hash(str(price.date)) % 8) * 0.01
-                        )  # 3-10% range
-
-                    # Create high/low around the open-close range
-                    min_price = min(open_price, close_price)
-                    max_price = max(open_price, close_price)
-
-                    # Extend high above the higher of open/close
-                    high_price = max_price * (1 + range_pct * 0.6)
-
-                    # Extend low below the lower of open/close
-                    low_price = min_price * (1 - range_pct * 0.4)
-
-                    # Ensure logical price relationships: low <= open,close <= high
-                    high_price = max(high_price, max(open_price, close_price))
-                    low_price = min(low_price, min(open_price, close_price))
-
-                    # Ensure prices are always positive
-                    low_price = max(
-                        low_price, close_price * 0.7
-                    )  # Don't go below 70% of close
+                        # Fallback for legacy data that only has single price point
+                        close_price = float(price.price)
+                        open_price = close_price
+                        high_price = close_price
+                        low_price = close_price
 
                     data.append(
                         {

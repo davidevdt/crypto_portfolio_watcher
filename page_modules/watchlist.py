@@ -17,7 +17,7 @@ from components.shared import (
     get_historical_data_from_database,
     format_currency,
     show_empty_state,
-    show_empty_watchlist,
+    smart_price_refresh,
 )
 from services.technical_indicators import TechnicalIndicators
 
@@ -115,7 +115,11 @@ def get_extended_historical_data(symbol: str, days: int, interval: str) -> List[
                 if price.price is None:
                     continue
 
-                close_price = float(price.price)
+                # Use proper close_price field with fallback to legacy price field
+                if hasattr(price, "close_price") and price.close_price is not None:
+                    close_price = float(price.close_price)
+                else:
+                    close_price = float(price.price)  # Fallback to legacy field
 
                 # Handle potentially missing OHLC data with null checks
                 open_price = close_price  # Default fallback
@@ -226,9 +230,110 @@ def get_extended_historical_data(symbol: str, days: int, interval: str) -> List[
         return []
 
 
+def show_watchlist_management():
+    """Show watchlist management interface with add/remove functionality."""
+    # Check if we should expand the management section
+    expanded = getattr(st.session_state, "watchlist_management_expanded", False)
+
+    with st.expander("📝 Manage Watchlist", expanded=expanded):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("➕ Add to Watchlist")
+
+            # Asset symbol input
+            symbol_input = st.text_input(
+                "Asset Symbol",
+                placeholder="e.g., BTC, ETH, ADA",
+                help="Enter the cryptocurrency symbol you want to monitor",
+                key="watchlist_symbol_input",
+            )
+
+            # Add button
+            if st.button(
+                "🔍 Add to Watchlist", type="primary", key="add_watchlist_btn"
+            ):
+                if symbol_input.strip():
+                    try:
+                        # Validate and add to watchlist
+                        symbol = symbol_input.strip().upper()
+
+                        # Add to watchlist using portfolio manager
+                        st.session_state.portfolio_manager.add_to_watchlist(
+                            symbol=symbol, notes=None, force_immediate_data_fetch=True
+                        )
+
+                        # Force sync of tracked assets and refresh prices for new asset
+                        st.session_state.portfolio_manager.sync_tracked_assets()
+                        smart_price_refresh(force_refresh=True)
+
+                        st.success(f"✅ {symbol} added to watchlist successfully!")
+
+                        # Reset expanded state
+                        st.session_state.watchlist_management_expanded = False
+
+                        # Refresh the page to show the new asset
+                        st.rerun()
+
+                    except ValueError as e:
+                        st.error(f"❌ {str(e)}")
+                    except Exception as e:
+                        st.error(f"❌ Error adding to watchlist: {str(e)}")
+                else:
+                    st.warning("⚠️ Please enter an asset symbol")
+
+        with col2:
+            st.subheader("📋 Current Watchlist")
+
+            try:
+                watchlist = st.session_state.portfolio_manager.get_watchlist()
+
+                if watchlist:
+                    for item in watchlist:
+                        with st.container():
+                            col_info, col_actions = st.columns([3, 1])
+
+                            with col_info:
+                                st.write(f"**{item.symbol}**")
+                                st.caption(
+                                    f"Added: {item.added_at.strftime('%Y-%m-%d')}"
+                                )
+
+                            with col_actions:
+                                if st.button(
+                                    "🗑️",
+                                    key=f"remove_{item.symbol}",
+                                    help=f"Remove {item.symbol}",
+                                ):
+                                    try:
+                                        st.session_state.portfolio_manager.remove_from_watchlist(
+                                            item.symbol
+                                        )
+                                        st.success(
+                                            f"✅ {item.symbol} removed from watchlist"
+                                        )
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(
+                                            f"❌ Error removing {item.symbol}: {str(e)}"
+                                        )
+
+                            st.markdown("---")
+                else:
+                    st.info(
+                        "📝 Your watchlist is empty. Add some assets using the form on the left."
+                    )
+
+            except Exception as e:
+                st.error(f"❌ Error loading watchlist: {str(e)}")
+
+
 def show():
     """Main watchlist monitoring and alerts page."""
     st.title("👀 Watchlist")
+
+    # Watchlist management interface
+    show_watchlist_management()
 
     # Watchlist monitoring (get timeframe parameters)
     watchlist_interval, watchlist_days = show_watchlist_monitoring()
@@ -605,7 +710,13 @@ def show_watchlist_monitoring():
         return "1h", 30  # Return default values
 
     if not watchlist:
-        show_empty_watchlist()
+        from components.shared import show_empty_state
+
+        show_empty_state(
+            title="Empty Watchlist",
+            message="Your watchlist is empty. Use the 'Manage Watchlist' section above to add cryptocurrencies and monitor their performance!",
+            icon="👀",
+        )
         return "1h", 30  # Return default values
 
     # Filter out stablecoins and create unique symbols
@@ -1252,9 +1363,6 @@ def show_detailed_asset_info(watchlist_interval: str, watchlist_days: int):
     st.subheader("📋 Detailed Asset Information")
 
     with st.expander("🔍 Detailed Info", expanded=False):
-        st.info(
-            f"📊 Using same timeframe as monitoring dashboard: {watchlist_interval} interval, {watchlist_days} days"
-        )
         st.write("Select assets to view detailed indicator values:")
 
         # Get unique symbols from watchlist

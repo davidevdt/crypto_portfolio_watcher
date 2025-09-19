@@ -118,7 +118,11 @@ def get_extended_historical_data(symbol: str, days: int, interval: str) -> List[
                 if price.price is None:
                     continue
 
-                close_price = float(price.price)
+                # Use proper close_price field with fallback to legacy price field
+                if hasattr(price, "close_price") and price.close_price is not None:
+                    close_price = float(price.close_price)
+                else:
+                    close_price = float(price.price)  # Fallback to legacy field
 
                 # Handle potentially missing OHLC data with null checks
                 open_price = close_price  # Default fallback
