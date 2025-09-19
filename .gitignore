@@ -3,4 +3,5 @@ CLAUDE.md
 **/__pycache__
 backup* 
 venv 
+db_data/portfolio*
 

@@ -63,12 +63,10 @@ def sidebar_navigation():
     # Add portfolio selector under Navigation for Portfolio Overview page
     if selected_page == "📊 Portfolio Overview":
         from components.shared import portfolio_selector
-
-        # Ensure session state is initialized before calling portfolio selector
-        if hasattr(st.session_state, "portfolio_manager"):
-            # Call portfolio selector with sidebar=True but from within the navigation function
-            # This ensures it appears right after Navigation
-            portfolio_selector(use_sidebar=True)
+        
+        # Always call portfolio selector for Portfolio Overview page
+        # It will handle the empty state (no portfolios) properly
+        portfolio_selector(use_sidebar=True)
 
     st.sidebar.markdown("---")
     if st.sidebar.button(

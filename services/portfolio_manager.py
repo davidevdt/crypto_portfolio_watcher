@@ -468,14 +468,99 @@ class PortfolioManager:
             portfolio.name = new_name
             session.commit()
 
-            # Detach from session to avoid issues
-            session.expunge(portfolio)
-
             logger.info(f"Portfolio renamed from '{old_name}' to '{new_name}'")
-            return portfolio
+            
+            # Return a dict with the updated information instead of detached object
+            return {
+                "id": portfolio.id,
+                "name": new_name,
+                "old_name": old_name
+            }
         except Exception as e:
             session.rollback()
             logger.error(f"Error updating portfolio name: {e}")
+            raise
+        finally:
+            session.close()
+
+    def delete_portfolio(self, portfolio_id: int, move_assets_to_portfolio_id: Optional[int] = None):
+        """
+        Delete a portfolio and optionally move its assets to another portfolio.
+        
+        Args:
+            portfolio_id: ID of the portfolio to delete
+            move_assets_to_portfolio_id: Optional portfolio ID to move assets to.
+                                       If None, assets will be deleted with the portfolio.
+        
+        Returns:
+            dict: Result information including deleted portfolio name and asset count
+        """
+        session = get_session()
+        try:
+            # Get the portfolio to delete
+            portfolio = session.query(Portfolio).get(portfolio_id)
+            if not portfolio:
+                raise ValueError(f"Portfolio with ID {portfolio_id} not found")
+            
+            portfolio_name = portfolio.name
+            
+            # Get assets in this portfolio
+            assets = session.query(Asset).filter(Asset.portfolio_id == portfolio_id).all()
+            asset_count = len(assets)
+            
+            # Handle asset migration if requested
+            if move_assets_to_portfolio_id:
+                # Verify target portfolio exists
+                target_portfolio = session.query(Portfolio).get(move_assets_to_portfolio_id)
+                if not target_portfolio:
+                    raise ValueError(f"Target portfolio with ID {move_assets_to_portfolio_id} not found")
+                
+                # Move assets to target portfolio
+                for asset in assets:
+                    asset.portfolio_id = move_assets_to_portfolio_id
+                
+                session.flush()  # Flush asset updates before deleting portfolio
+                logger.info(f"Moved {asset_count} assets from '{portfolio_name}' to '{target_portfolio.name}'")
+            else:
+                # Delete assets first (they will be deleted with portfolio anyway due to CASCADE)
+                for asset in assets:
+                    session.delete(asset)
+                logger.info(f"Deleted {asset_count} assets with portfolio '{portfolio_name}'")
+            
+            # Delete related portfolio value history records
+            from database.models import PortfolioValueHistory
+            history_records = session.query(PortfolioValueHistory).filter(
+                PortfolioValueHistory.portfolio_id == portfolio_id
+            ).all()
+            for record in history_records:
+                session.delete(record)
+            
+            if history_records:
+                logger.info(f"Deleted {len(history_records)} portfolio value history records for '{portfolio_name}'")
+            
+            # Delete the portfolio
+            session.delete(portfolio)
+            session.commit()
+            
+            # Sync tracked assets after portfolio deletion
+            try:
+                self.sync_tracked_assets()
+            except Exception as e:
+                logger.warning(f"Could not sync tracked assets after portfolio deletion: {e}")
+            
+            result = {
+                "portfolio_name": portfolio_name,
+                "asset_count": asset_count,
+                "assets_moved": move_assets_to_portfolio_id is not None,
+                "target_portfolio_id": move_assets_to_portfolio_id
+            }
+            
+            logger.info(f"Successfully deleted portfolio '{portfolio_name}' with {asset_count} assets")
+            return result
+            
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error deleting portfolio: {e}")
             raise
         finally:
             session.close()

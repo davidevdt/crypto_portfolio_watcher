@@ -14,7 +14,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 from components.shared import (
-    portfolio_selector,
     smart_price_refresh,
     format_currency,
     format_percentage,
@@ -165,7 +164,17 @@ def show():
 
     # Portfolio selector is now handled in the main app navigation for this page
     # Get the current selected portfolio from session state
-    selected_portfolio = st.session_state.get("selected_portfolio", "all")
+    selected_portfolio = st.session_state.get("selected_portfolio", None)
+    
+    # Debug: Check if we have any portfolios at all
+    try:
+        all_portfolios = st.session_state.portfolio_manager.get_all_portfolios()
+        if not all_portfolios:
+            # Force selected_portfolio to None when no portfolios exist
+            st.session_state.selected_portfolio = None
+            selected_portfolio = None
+    except Exception as e:
+        st.error(f"Error checking portfolios: {e}")
 
     if selected_portfolio is None:
         st.markdown("---")
@@ -356,7 +365,7 @@ def show():
             elif empty_portfolio_clicked and not portfolio_name.strip():
                 st.error("❌ Portfolio name cannot be empty")
 
-        return
+        return  # Return after handling empty state forms
 
     # Get assets based on selection - ALWAYS fresh from database
     # Clear any cached assets to ensure fresh data
@@ -441,15 +450,11 @@ def show():
         show_portfolio_24h_change(summary, selected_portfolio)
 
     # 90-day portfolio progress chart
-    # For progress chart, we need original assets even for aggregated view
     if use_aggregated:
         original_assets = st.session_state.portfolio_manager.get_all_assets()
         show_portfolio_progress_chart(original_assets, selected_portfolio, summary)
     else:
         show_portfolio_progress_chart(assets, selected_portfolio, summary)
-
-    # Database polling is now handled automatically by poll_database_continuously() above
-    # The continuous polling system will trigger st.rerun() when new data is available
 
     # Show portfolios summary table when "All Portfolios" is selected
     if selected_portfolio == "all":
@@ -478,13 +483,11 @@ def show():
 
     # Asset management section - Collapsible expandable box
     with st.expander("🔧 Asset Management", expanded=False):
-        # Asset management only works with individual portfolios, not aggregated view
         if selected_portfolio != "all":
             show_asset_management(assets, selected_portfolio)
         else:
-            st.info(
-                "💡 Asset management is available when viewing individual portfolios. Select a specific portfolio above to add, edit, or delete assets."
-            )
+            # Show asset management for "All Portfolios" view
+            show_asset_management_all_portfolios()
 
 
 def show_portfolio_progress_chart(assets: List, selected_portfolio, summary: Dict):
@@ -1911,31 +1914,32 @@ def show_portfolio_management():
                     help="Enter the new name for your portfolio",
                 )
 
-                col1, col2 = st.columns(2)
-                with col1:
-                    if (
-                        new_portfolio_name.strip()
-                        and new_portfolio_name.strip() != current_portfolio.name
-                    ):
-                        rename_clicked = st.form_submit_button(
-                            f"✨ Rename to '{new_portfolio_name.strip()}'",
-                            type="primary",
-                        )
-                    else:
-                        rename_clicked = st.form_submit_button(
-                            "Rename Portfolio", type="primary", disabled=True
-                        )
+                # Always show an enabled button - validation happens after click
+                rename_clicked = st.form_submit_button(
+                    "✏️ Rename Portfolio", 
+                    type="primary"
+                )
 
-                if rename_clicked and new_portfolio_name.strip():
-                    if new_portfolio_name.strip() == current_portfolio.name:
-                        st.info("Portfolio name is the same - no changes needed")
+                if rename_clicked:
+                    new_name = new_portfolio_name.strip() if new_portfolio_name else ""
+                    current_name = current_portfolio.name  # Store name before DB operation
+                    current_id = current_portfolio.id  # Store ID before DB operation
+                    
+                    if not new_name:
+                        st.error("❌ Portfolio name cannot be empty")
+                    elif new_name == current_name:
+                        st.info("💡 Portfolio name is the same - no changes needed")
                     else:
                         try:
-                            updated_portfolio = st.session_state.portfolio_manager.update_portfolio_name(
-                                current_portfolio.id, new_portfolio_name.strip()
+                            result = st.session_state.portfolio_manager.update_portfolio_name(
+                                current_id, new_name
                             )
+                            
+                            # Clear portfolio caches to ensure UI refresh
+                            refresh_portfolio_data_after_operation()
+                            
                             st.success(
-                                f"✅ Portfolio renamed from '{current_portfolio.name}' to '{updated_portfolio.name}'!"
+                                f"✅ Portfolio renamed from '{result['old_name']}' to '{result['name']}' !"
                             )
                             st.info(
                                 "🎉 Your portfolio name has been updated successfully!"
@@ -1962,11 +1966,8 @@ def show_portfolio_management():
                 move_assets = st.checkbox(
                     "Move assets to Main Portfolio (otherwise assets will be deleted)"
                 )
-                confirm_delete = st.checkbox(
-                    "I understand this action cannot be undone"
-                )
 
-                if st.form_submit_button("Delete Portfolio") and confirm_delete:
+                if st.form_submit_button("Delete Portfolio"):
                     try:
                         portfolio = next(
                             p
@@ -1974,34 +1975,38 @@ def show_portfolio_management():
                             if p.name == portfolio_to_delete
                         )
 
+                        # Determine target portfolio for asset migration
+                        target_portfolio_id = None
                         if move_assets:
-                            # Move assets to Main Portfolio
-                            assets = (
-                                st.session_state.portfolio_manager.get_portfolio_assets(
-                                    portfolio.id
-                                )
-                            )
                             main_portfolio = st.session_state.portfolio_manager.get_portfolio_by_name(
                                 "Main Portfolio"
                             )
+                            if not main_portfolio:
+                                # Create Main Portfolio if it doesn't exist
+                                main_portfolio = st.session_state.portfolio_manager.create_portfolio("Main Portfolio")
+                            target_portfolio_id = main_portfolio.id
 
-                            for asset in assets:
-                                st.session_state.portfolio_manager.add_asset(
-                                    portfolio_id=main_portfolio.id,
-                                    symbol=asset.symbol,
-                                    quantity=asset.quantity,
-                                    buy_price=asset.average_buy_price,
-                                )
-                                st.session_state.portfolio_manager.delete_asset(
-                                    asset.id
-                                )
-
-                        # Delete portfolio (CASCADE will handle remaining assets)
-                        # This would require adding a delete_portfolio method to PortfolioManager
-                        st.success(f"Portfolio '{portfolio_to_delete}' deleted!")
+                        # Use the new delete_portfolio method
+                        result = st.session_state.portfolio_manager.delete_portfolio(
+                            portfolio.id, target_portfolio_id
+                        )
+                        
+                        # Clear portfolio caches to ensure UI refresh
+                        refresh_portfolio_data_after_operation()
+                        
+                        # Show success message
+                        if result["assets_moved"]:
+                            st.success(f"✅ Portfolio '{result['portfolio_name']}' deleted and {result['asset_count']} assets moved to Main Portfolio!")
+                        else:
+                            st.success(f"✅ Portfolio '{result['portfolio_name']}' and {result['asset_count']} assets deleted!")
+                        
+                        # Reset selected portfolio if we deleted the current one
+                        if st.session_state.get("selected_portfolio") == portfolio.id:
+                            st.session_state.selected_portfolio = "all"
+                            
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error deleting portfolio: {e}")
+                        st.error(f"❌ Error deleting portfolio: {e}")
 
 
 def show_edit_asset_form(assets: List):
@@ -2769,3 +2774,72 @@ def show_portfolio_charts(consistent_prices: Dict):
             )
             fig_dollar.update_layout(height=500)
             st.plotly_chart(fig_dollar, width="stretch")
+
+
+def show_asset_management_all_portfolios():
+    """Show asset management for All Portfolios view with portfolio selection.
+    
+    Fetches individual assets directly for proper asset management functionality.
+    """
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("➕ Add Asset")
+        
+        # Get all portfolios for selection
+        portfolios = st.session_state.portfolio_manager.get_all_portfolios()
+        if not portfolios:
+            st.info("No portfolios available. Create a portfolio first.")
+            return
+            
+        # Portfolio selection for adding assets
+        portfolio_options = {p.name: p.id for p in portfolios}
+        selected_portfolio_name = st.selectbox(
+            "Select Portfolio to Add Asset To",
+            options=list(portfolio_options.keys()),
+            help="Choose which portfolio to add the new asset to"
+        )
+        selected_portfolio_id = portfolio_options[selected_portfolio_name]
+        
+        # Use the existing add asset form logic but with portfolio selection
+        show_add_asset_form(selected_portfolio_id)
+        
+        # Portfolio management (rename/delete)
+        st.markdown("---")
+        show_portfolio_management()
+    
+    with col2:
+        st.subheader("✏️ Edit/Delete Assets")
+        
+        # Get individual assets (not aggregated) for editing/deleting
+        all_individual_assets = st.session_state.portfolio_manager.get_all_assets()
+        
+        if not all_individual_assets:
+            st.info("No assets to manage.")
+            return
+            
+        # Asset selection for editing/deleting - show individual assets with portfolio info
+        asset_options = {}
+        for asset in all_individual_assets:
+            # Find the portfolio for this asset
+            portfolio = next((p for p in portfolios if p.id == asset.portfolio_id), None)
+            portfolio_name = portfolio.name if portfolio else "Unknown"
+            display_name = f"{asset.symbol} ({portfolio_name}) - {asset.quantity:.6f}"
+            asset_options[display_name] = asset
+            
+        selected_asset_name = st.selectbox(
+            "Select Asset to Edit/Delete",
+            options=list(asset_options.keys()),
+            help="Choose an asset to edit or delete"
+        )
+        
+        if selected_asset_name:
+            selected_asset = asset_options[selected_asset_name]
+            
+            # Show edit form for selected asset
+            show_edit_asset_form([selected_asset])
+            
+            st.markdown("---")
+            
+            # Show delete/sell form for selected asset  
+            show_delete_sell_asset_form([selected_asset])

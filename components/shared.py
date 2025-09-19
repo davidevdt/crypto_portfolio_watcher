@@ -853,6 +853,11 @@ def send_whatsapp_notification(message: str, phone_number: str):
 # Portfolio selector component
 def portfolio_selector(use_sidebar=False):
     """Portfolio selector component to be placed at the top of pages or in sidebar."""
+    # Ensure session state is properly initialized
+    if not hasattr(st.session_state, 'portfolio_manager'):
+        from components.shared import init_session_state
+        init_session_state()
+    
     # Cache portfolios to avoid repeated DB queries
     cache_key = "portfolio_selector_cache"
     if cache_key not in st.session_state or not st.session_state.get(cache_key):
@@ -901,6 +906,8 @@ def portfolio_selector(use_sidebar=False):
         st.session_state.selected_portfolio = new_selection
         return st.session_state.selected_portfolio
 
+    # When no portfolios exist, set selected_portfolio to None for empty state handling
+    st.session_state.selected_portfolio = None
     return None
 
 
@@ -2207,6 +2214,7 @@ def refresh_portfolio_data_after_operation():
             "period_tracker_",
             "_assets_",
             "_portfolios_",
+            "portfolio_selector_cache",  # Specifically clear portfolio selector cache
         ]
 
         keys_to_clear = []
