@@ -63,7 +63,7 @@ def sidebar_navigation():
     # Add portfolio selector under Navigation for Portfolio Overview page
     if selected_page == "📊 Portfolio Overview":
         from components.shared import portfolio_selector
-        
+
         # Always call portfolio selector for Portfolio Overview page
         # It will handle the empty state (no portfolios) properly
         portfolio_selector(use_sidebar=True)

@@ -197,7 +197,7 @@ def get_historical_data_from_db(
 
             session.close()
 
-            if historical_prices:  # Display whatever data we have
+            if historical_prices: 
                 # Convert to expected format with proper OHLC data generation
                 data = []
 

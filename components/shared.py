@@ -854,10 +854,11 @@ def send_whatsapp_notification(message: str, phone_number: str):
 def portfolio_selector(use_sidebar=False):
     """Portfolio selector component to be placed at the top of pages or in sidebar."""
     # Ensure session state is properly initialized
-    if not hasattr(st.session_state, 'portfolio_manager'):
+    if not hasattr(st.session_state, "portfolio_manager"):
         from components.shared import init_session_state
+
         init_session_state()
-    
+
     # Cache portfolios to avoid repeated DB queries
     cache_key = "portfolio_selector_cache"
     if cache_key not in st.session_state or not st.session_state.get(cache_key):
