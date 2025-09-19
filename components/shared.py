@@ -1041,6 +1041,45 @@ def format_currency(value: float, decimals: int = 2) -> str:
     return f"${value:,.{decimals}f}"
 
 
+def format_smart_currency(value: float) -> str:
+    """Format currency with smart decimal precision (4-8 decimals, showing only meaningful digits)."""
+    if pd.isna(value) or value is None:
+        return "$0.0000"
+
+    # Handle zero values
+    if value == 0:
+        return "$0.0000"
+
+    # For very small values, show up to 8 decimals
+    if abs(value) < 0.0001:
+        formatted = f"{value:.8f}".rstrip("0")
+        if formatted.endswith("."):
+            formatted += "0000"
+        elif len(formatted.split(".")[-1]) < 4:
+            formatted += "0" * (4 - len(formatted.split(".")[-1]))
+        return f"${formatted}"
+    elif abs(value) < 1:
+        # Show up to 6 decimals for values less than $1
+        formatted = f"{value:.6f}".rstrip("0")
+        if formatted.endswith("."):
+            formatted += "0000"
+        elif len(formatted.split(".")[-1]) < 4:
+            formatted += "0" * (4 - len(formatted.split(".")[-1]))
+        return f"${formatted}"
+    else:
+        # For larger values, use 4 decimals but remove trailing zeros
+        formatted = f"{value:.4f}".rstrip("0")
+        if formatted.endswith("."):
+            formatted += "0000"
+        elif len(formatted.split(".")[-1]) < 4:
+            formatted += "0" * (4 - len(formatted.split(".")[-1]))
+        # Add comma separators for values >= $1000
+        if float(formatted) >= 1000:
+            return f"${float(formatted):,.8f}".rstrip("0").rstrip(".")
+        else:
+            return f"${formatted}"
+
+
 def format_percentage(value: float, decimals: int = 2) -> str:
     """Format percentage value with proper sign and decimals."""
     if pd.isna(value) or value is None:
@@ -1060,6 +1099,41 @@ def format_crypto_quantity(value: float, decimals: int = 6) -> str:
     if pd.isna(value) or value is None:
         return "0.000000"
     return f"{value:,.{decimals}f}"
+
+
+def format_smart_quantity(value: float) -> str:
+    """Format crypto quantities with smart decimal precision (4-8 decimals, showing only meaningful digits)."""
+    if pd.isna(value) or value is None:
+        return "0.0000"
+
+    # Handle zero values
+    if value == 0:
+        return "0.0000"
+
+    # For very small quantities, show up to 8 decimals
+    if abs(value) < 0.0001:
+        formatted = f"{value:.8f}".rstrip("0")
+        if formatted.endswith("."):
+            formatted += "0000"
+        elif len(formatted.split(".")[-1]) < 4:
+            formatted += "0" * (4 - len(formatted.split(".")[-1]))
+        return formatted
+    elif abs(value) < 1:
+        # Show up to 6 decimals for small quantities
+        formatted = f"{value:.6f}".rstrip("0")
+        if formatted.endswith("."):
+            formatted += "0000"
+        elif len(formatted.split(".")[-1]) < 4:
+            formatted += "0" * (4 - len(formatted.split(".")[-1]))
+        return formatted
+    else:
+        # For larger quantities, use 4 decimals but remove trailing zeros
+        formatted = f"{value:.4f}".rstrip("0")
+        if formatted.endswith("."):
+            formatted += "0000"
+        elif len(formatted.split(".")[-1]) < 4:
+            formatted += "0" * (4 - len(formatted.split(".")[-1]))
+        return formatted
 
 
 def format_large_number(value: float) -> str:

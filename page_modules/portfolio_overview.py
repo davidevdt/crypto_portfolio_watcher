@@ -18,6 +18,8 @@ from components.shared import (
     format_currency,
     format_percentage,
     format_crypto_quantity,
+    format_smart_currency,
+    format_smart_quantity,
     create_portfolio_allocation_chart,
     create_performance_bar_chart,
     poll_database_continuously,
@@ -1235,9 +1237,9 @@ def show_portfolio_assets_table(
             {
                 "Symbol": symbol,
                 "Portfolio": portfolio_name,
-                "Current Price": f"${current_price:,.4f}",
-                "Quantity": f"{quantity:,.6f}",
-                "Avg Buy Price": f"${average_buy_price:,.4f}",
+                "Current Price": format_smart_currency(current_price),
+                "Quantity": format_smart_quantity(quantity),
+                "Avg Buy Price": format_smart_currency(average_buy_price),
                 "Total Value": f"${current_value:,.2f}",  # NEW: Current Price * Quantity
                 "Total Spent": f"${quantity * average_buy_price:,.2f}",  # NEW: Average Buy Price * Quantity
                 "Current Allocation %": f"{current_allocation:.1f}%",
@@ -2160,9 +2162,11 @@ def show_delete_sell_asset_form(assets: List):
             col1, col2 = st.columns(2)
             with col1:
                 st.write(f"Symbol: {asset.symbol}")
-                st.write(f"Current Quantity: {asset.quantity:.6f}")
+                st.write(f"Current Quantity: {format_smart_quantity(asset.quantity)}")
             with col2:
-                st.write(f"Avg Buy Price: ${asset.average_buy_price:.4f}")
+                st.write(
+                    f"Avg Buy Price: {format_smart_currency(asset.average_buy_price)}"
+                )
 
                 # Safely get current price with fallback
                 current_price = asset.average_buy_price  # Default fallback

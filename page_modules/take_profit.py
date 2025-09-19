@@ -14,6 +14,8 @@ from components.shared import (
     format_percentage,
     format_number,
     format_crypto_quantity,
+    format_smart_currency,
+    format_smart_quantity,
     send_desktop_notification,
     show_empty_state,
     show_empty_profit_history,
@@ -200,9 +202,9 @@ def show_profit_history_table():
                     {
                         "Date": record.sold_at.strftime("%Y-%m-%d %H:%M"),
                         "Symbol": record.symbol,
-                        "Quantity Sold": f"{record.quantity_sold:,.6f}",
-                        "Sell Price": format_currency(record.sell_price, 4),
-                        "Buy Price": format_currency(record.average_buy_price, 4),
+                        "Quantity Sold": format_smart_quantity(record.quantity_sold),
+                        "Sell Price": format_smart_currency(record.sell_price),
+                        "Buy Price": format_smart_currency(record.average_buy_price),
                         "Sale Value": format_currency(
                             record.quantity_sold * record.sell_price
                         ),
@@ -394,9 +396,11 @@ def show_quick_sell_interface():
                     current_price = st.session_state.current_prices.get(
                         asset.symbol, asset.average_buy_price
                     )
-                    st.write(f"**Current Price:** {format_currency(current_price, 4)}")
                     st.write(
-                        f"**Avg Buy Price:** {format_currency(asset.average_buy_price, 4)}"
+                        f"**Current Price:** {format_smart_currency(current_price)}"
+                    )
+                    st.write(
+                        f"**Avg Buy Price:** {format_smart_currency(asset.average_buy_price)}"
                     )
 
                 with col2:
