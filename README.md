@@ -22,7 +22,7 @@ A comprehensive crypto portfolio monitoring application built with **Streamlit**
 ### 🔔 Smart Monitoring & Alerts
 - **Multi-Signal Detection**: Oversold/Overbought conditions with strength percentages
 - **Trend Analysis**: EMA/SMA/MACD trend indicators with directional signals
-- **Volatility Classification**: Low/Medium/High volatility regime detection
+- **Volatility Classification**: Low/Moderate/High volatility regime detection
 - **Desktop Notifications**: Real-time alerts for price movements and signals
 - **Watchlist Integration**: Monitor assets before adding to portfolio
 
@@ -97,6 +97,9 @@ Monitor potential investments with full signal analysis. Integrates with charts 
 
 ### ⚙️ Settings
 Comprehensive configuration for notifications, display preferences, technical indicators, and data management.
+
+### 🔗 Data Providers
+Monitor and manage the multi-exchange data provider system. View real-time performance metrics, API call statistics, and provider reliability scores. Track which exchanges work best for each asset and troubleshoot data fetching issues.
 
 ## 🚀 Quick Start
 

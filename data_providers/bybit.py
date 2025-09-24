@@ -83,6 +83,7 @@ class BybitProvider(CryptoDataProvider):
         start_date: datetime.datetime,
         end_date: datetime.datetime,
         interval: str,
+        recent_only: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Get historical price data for a cryptocurrency from Bybit.
@@ -92,6 +93,7 @@ class BybitProvider(CryptoDataProvider):
             start_date (datetime.datetime): The start date for the data.
             end_date (datetime.datetime): The end date for the data.
             interval (str): The time interval (e.g., '1m', '1h', '1d').
+            recent_only (bool): If True, fetch only the most recent 1000 candles.
 
         Returns:
             List[Dict[str, Any]]: A list of dictionaries with OHLCV data.
@@ -100,14 +102,25 @@ class BybitProvider(CryptoDataProvider):
             ValueError: If historical data cannot be fetched.
         """
         bybit_interval = self._convert_interval(interval)
-        params = {
-            "category": "linear",
-            "symbol": symbol,
-            "interval": bybit_interval,
-            "start": int(start_date.timestamp() * 1000),
-            "end": int(end_date.timestamp() * 1000),
-            "limit": 1000,  # Bybit max limit
-        }
+
+        if recent_only:
+            # Fetch only the most recent data without date constraints
+            params = {
+                "category": "linear",
+                "symbol": symbol,
+                "interval": bybit_interval,
+                "limit": 1000,  # Bybit max limit - gets most recent 1000 candles
+            }
+        else:
+            # Use date range as before
+            params = {
+                "category": "linear",
+                "symbol": symbol,
+                "interval": bybit_interval,
+                "start": int(start_date.timestamp() * 1000),
+                "end": int(end_date.timestamp() * 1000),
+                "limit": 1000,  # Bybit max limit
+            }
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(self.kline_endpoint, params=params) as response:

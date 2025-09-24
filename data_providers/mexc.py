@@ -2,7 +2,6 @@ import datetime
 from typing import List, Dict, Any
 import aiohttp
 import pandas as pd
-import numpy as np
 import asyncio
 import logging
 from .base_provider import CryptoDataProvider
@@ -76,6 +75,7 @@ class MEXCProvider(CryptoDataProvider):
         start_date: datetime.datetime,
         end_date: datetime.datetime,
         interval: str,
+        recent_only: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Get historical price data for a cryptocurrency from MEXC.
@@ -85,6 +85,7 @@ class MEXCProvider(CryptoDataProvider):
             start_date (datetime.datetime): The start date for the data.
             end_date (datetime.datetime): The end date for the data.
             interval (str): The time interval (e.g., '1m', '1h', '1d').
+            recent_only (bool): If True, fetch only the most recent 1000 candles.
 
         Returns:
             List[Dict[str, Any]]: A list of dictionaries with OHLCV data.
@@ -93,13 +94,23 @@ class MEXCProvider(CryptoDataProvider):
             ValueError: If historical data cannot be fetched.
         """
         mexc_interval = self._convert_interval(interval)
-        params = {
-            "symbol": symbol,
-            "interval": mexc_interval,
-            "startTime": int(start_date.timestamp() * 1000),
-            "endTime": int(end_date.timestamp() * 1000),
-            "limit": 1000,  # MEXC max limit
-        }
+
+        if recent_only:
+            # Fetch only the most recent data without date constraints
+            params = {
+                "symbol": symbol,
+                "interval": mexc_interval,
+                "limit": 1000,  # MEXC max limit - gets most recent 1000 candles
+            }
+        else:
+            # Use date range as before
+            params = {
+                "symbol": symbol,
+                "interval": mexc_interval,
+                "startTime": int(start_date.timestamp() * 1000),
+                "endTime": int(end_date.timestamp() * 1000),
+                "limit": 1000,  # MEXC max limit
+            }
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(self.kline_endpoint, params=params) as response:

@@ -1306,7 +1306,7 @@ def create_monitoring_dataframe(df: pd.DataFrame, _: str = "1d"):
                     styles[col_name] = "color: #28a745"  # Green
                 elif "High" in row[col_name]:
                     styles[col_name] = "color: #dc3545"  # Red
-                elif "Medium" in row[col_name]:
+                elif "Medium" in row[col_name] or "Moderate" in row[col_name]:
                     styles[col_name] = "color: #ffc107"  # Yellow
 
         # Style MACD columns dynamically
@@ -1351,7 +1351,7 @@ def show_legend():
         **Color Legend:**
         - 🟢 **Green**: Price < Moving Averages, Low Volatility, MACD > 0, RSI ≤ 30 (Oversold)
         - 🔴 **Red**: Price > Moving Averages, High Volatility, MACD < 0, RSI ≥ 70 (Overbought)  
-        - 🟡 **Yellow**: Medium Volatility, RSI 30-70 (Neutral)
+        - 🟡 **Yellow**: Moderate Volatility, RSI 30-70 (Neutral)
         - ⚪ **White**: No data available
         
         **Bubble Indicators**: Highlight significant oversold (green bubble) / overbought (red bubble) conditions
@@ -1509,28 +1509,11 @@ def show_detailed_asset_info(watchlist_interval: str, watchlist_days: int):
                                 closes, bb_period, bb_std
                             )
 
-                            # Calculate volatility with user parameters
-                            vol_details = {
-                                "short_term_vol": (
-                                    np.std(closes[-vol_short:])
-                                    / np.mean(closes[-vol_short:])
-                                    if len(closes) >= vol_short
-                                    else np.nan
-                                ),
-                                "long_term_vol": (
-                                    np.std(closes[-vol_long:])
-                                    / np.mean(closes[-vol_long:])
-                                    if len(closes) >= vol_long
-                                    else np.nan
-                                ),
-                            }
-                            vol_details["volatility_ratio"] = (
-                                vol_details["short_term_vol"]
-                                / vol_details["long_term_vol"]
-                                if not np.isnan(vol_details["short_term_vol"])
-                                and not np.isnan(vol_details["long_term_vol"])
-                                and vol_details["long_term_vol"] != 0
-                                else np.nan
+                            # Calculate volatility with user parameters - USE SAME METHOD AS DASHBOARD
+                            vol_details = (
+                                TechnicalIndicators.calculate_volatility_details(
+                                    closes, vol_short, vol_long
+                                )
                             )
 
                             detailed_data.append(

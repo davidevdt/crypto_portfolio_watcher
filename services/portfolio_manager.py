@@ -33,7 +33,13 @@ class PortfolioManager:
     """
 
     def __init__(self):
-        pass
+        # Run migration for provider tracking on first initialization
+        try:
+            from database.models import migrate_tracked_assets
+
+            migrate_tracked_assets()
+        except Exception as e:
+            logger.warning(f"Provider tracking migration warning (non-critical): {e}")
 
     def create_portfolio(self, name: str) -> Portfolio:
         """Create a new portfolio.
@@ -1645,3 +1651,46 @@ class PortfolioManager:
             ),
             "asset_count": len(aggregated_assets),
         }
+
+    def update_asset_provider(self, symbol: str, provider: Optional[str]) -> bool:
+        """Update the preferred data provider for an asset.
+
+        Args:
+            symbol: Asset symbol to update
+            provider: Provider class name (e.g., 'BinanceProvider') or None for auto
+
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        try:
+            session = get_session()
+
+            # Find the tracked asset
+            tracked_asset = (
+                session.query(TrackedAsset)
+                .filter(TrackedAsset.symbol == symbol)
+                .first()
+            )
+
+            if tracked_asset:
+                tracked_asset.preferred_data_provider = provider
+                tracked_asset.updated_at = datetime.utcnow()
+                session.commit()
+
+                provider_name = provider or "Auto"
+                logger.info(f"Updated provider for {symbol} to {provider_name}")
+
+                session.close()
+                return True
+            else:
+                logger.warning(f"Tracked asset {symbol} not found")
+                session.close()
+                return False
+
+        except Exception as e:
+            logger.error(f"Error updating provider for {symbol}: {e}")
+            try:
+                session.close()
+            except:
+                pass
+            return False

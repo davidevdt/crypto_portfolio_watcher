@@ -23,6 +23,7 @@ from page_modules import (
     take_profit_levels,
     watchlist,
     settings,
+    data_providers,
 )
 
 # Configure logging
@@ -55,6 +56,7 @@ def sidebar_navigation():
         "💰 Take Profit": "take_profit",
         "🎯 Take Profit Levels": "take_profit_levels",
         "👀 Watchlist": "watchlist",
+        "📡 Data Providers": "data_providers",
         "⚙️ Settings": "settings",
     }
 
@@ -67,6 +69,108 @@ def sidebar_navigation():
         # Always call portfolio selector for Portfolio Overview page
         # It will handle the empty state (no portfolios) properly
         portfolio_selector(use_sidebar=True)
+
+    # Add asset selection controls under Navigation for Asset Charts page
+    elif selected_page == "📈 Asset Charts":
+        from services.portfolio_manager import PortfolioManager
+
+        # Get all assets from all portfolios and watchlist
+        pm = PortfolioManager()
+        assets = []
+        try:
+            # Get portfolio assets
+            portfolios = pm.get_all_portfolios()
+            for portfolio in portfolios:
+                portfolio_assets = pm.get_portfolio_assets(portfolio.id)
+                assets.extend([asset.symbol for asset in portfolio_assets])
+
+            # Get watchlist assets
+            watchlist = pm.get_watchlist()
+            assets.extend([item.symbol for item in watchlist])
+        except Exception:
+            pass
+
+        # Remove duplicates and sort
+        all_symbols = sorted(list(set(assets))) if assets else []
+
+        if all_symbols:
+            # Asset selection
+            selected_symbol = st.sidebar.selectbox(
+                "📊 Select Asset", all_symbols, key="sidebar_asset_select"
+            )
+            st.session_state.sidebar_selected_symbol = selected_symbol
+
+            # Timeframe selection
+            timeframes = ["1 hour", "4 hours", "1 day", "1 week", "1 month"]
+            selected_timeframe = st.sidebar.selectbox(
+                "⏰ Timeframe", timeframes, index=2, key="sidebar_timeframe_select"
+            )
+            st.session_state.sidebar_selected_timeframe = selected_timeframe
+
+            # Period options based on selected timeframe
+            period_options = {
+                "1 hour": {
+                    "1 day": 1,
+                    "3 days": 3,
+                    "7 days": 7,
+                    "14 days": 14,
+                    "30 days": 30,
+                },
+                "4 hours": {
+                    "3 days": 3,
+                    "7 days": 7,
+                    "14 days": 14,
+                    "30 days": 30,
+                    "60 days": 60,
+                    "90 days": 90,
+                },
+                "1 day": {
+                    "7 days": 7,
+                    "30 days": 30,
+                    "90 days": 90,
+                    "6 months": 180,
+                    "1 year": 365,
+                    "3 years": 1095,
+                    "5 years": 1825,
+                },
+                "1 week": {
+                    "3 months": 90,
+                    "6 months": 180,
+                    "1 year": 365,
+                    "2 years": 730,
+                    "3 years": 1095,
+                    "5 years": 1825,
+                },
+                "1 month": {
+                    "6 months": 180,
+                    "1 year": 365,
+                    "2 years": 730,
+                    "3 years": 1095,
+                    "5 years": 1825,
+                },
+            }
+
+            available_periods = list(period_options[selected_timeframe].keys())
+            default_periods = {
+                "1 hour": "7 days",
+                "4 hours": "30 days",
+                "1 day": "90 days",
+                "1 week": "1 year",
+                "1 month": "2 years",
+            }
+
+            default_index = (
+                available_periods.index(default_periods[selected_timeframe])
+                if default_periods[selected_timeframe] in available_periods
+                else 0
+            )
+            selected_period = st.sidebar.selectbox(
+                "📊 Period",
+                available_periods,
+                index=default_index,
+                key="sidebar_period_select",
+            )
+            st.session_state.sidebar_selected_period = selected_period
 
     st.sidebar.markdown("---")
     if st.sidebar.button(
@@ -184,6 +288,8 @@ def main():
         take_profit_levels.show()
     elif selected_page == "watchlist":
         watchlist.show()
+    elif selected_page == "data_providers":
+        data_providers.show_data_providers_page()
     elif selected_page == "settings":
         settings.show()
 

@@ -501,6 +501,64 @@ def show_active_alerts():
 
     with col1:
         if st.button("🔄 Check All Signals"):
+            # First trigger fresh data update, then check signals
+            try:
+                from components.shared import trigger_fresh_data_update
+                import asyncio
+
+                st.info(
+                    "📡 Fetching fresh data from exchanges before checking signals..."
+                )
+
+                # Get symbols to update
+                all_assets = st.session_state.portfolio_manager.get_all_assets()
+                watchlist = st.session_state.portfolio_manager.get_watchlist()
+                symbols_to_update = set()
+
+                for asset in all_assets:
+                    if asset.symbol not in [
+                        "USDT",
+                        "USDC",
+                        "BUSD",
+                        "DAI",
+                        "USDD",
+                        "TUSD",
+                    ]:
+                        symbols_to_update.add(asset.symbol)
+
+                for item in watchlist:
+                    if item.symbol not in [
+                        "USDT",
+                        "USDC",
+                        "BUSD",
+                        "DAI",
+                        "USDD",
+                        "TUSD",
+                    ]:
+                        symbols_to_update.add(item.symbol)
+
+                if symbols_to_update:
+                    symbols_list = list(symbols_to_update)
+                    # Run the async data update
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            st.warning("📡 Fresh data update scheduled")
+                        else:
+                            asyncio.run(trigger_fresh_data_update(symbols_list))
+                            st.success(
+                                f"📡 Fresh data updated for {len(symbols_list)} symbols!"
+                            )
+                    except RuntimeError:
+                        asyncio.run(trigger_fresh_data_update(symbols_list))
+                        st.success(
+                            f"📡 Fresh data updated for {len(symbols_list)} symbols!"
+                        )
+
+            except Exception as e:
+                st.warning(f"⚠️ Could not fetch fresh data: {e}")
+
+            # Now check signals with fresh data
             check_all_signals()
 
     with col2:
@@ -1224,7 +1282,7 @@ def create_monitoring_dataframe(df: pd.DataFrame, monitoring_interval: str = "1d
                     styles[col_name] = "color: #28a745"  # Green
                 elif "High" in row[col_name]:
                     styles[col_name] = "color: #dc3545"  # Red
-                elif "Medium" in row[col_name]:
+                elif "Medium" in row[col_name] or "Moderate" in row[col_name]:
                     styles[col_name] = "color: #ffc107"  # Yellow
 
         # Style MACD columns dynamically
@@ -1269,7 +1327,7 @@ def show_legend():
         **Color Legend:**
         - 🟢 **Green**: Price < Moving Averages, Low Volatility, MACD > 0, RSI ≤ 30 (Oversold)
         - 🔴 **Red**: Price > Moving Averages, High Volatility, MACD < 0, RSI ≥ 70 (Overbought)  
-        - 🟡 **Yellow**: Medium Volatility, RSI 30-70 (Neutral)
+        - 🟡 **Yellow**: Moderate Volatility, RSI 30-70 (Neutral)
         - ⚪ **White**: No data available
         
         **Bubble Indicators**: Highlight significant oversold (green bubble) / overbought (red bubble) conditions
@@ -1423,28 +1481,11 @@ def show_detailed_asset_info(monitoring_interval: str, monitoring_days: int):
                                 closes, bb_period, bb_std
                             )
 
-                            # Calculate volatility with user parameters
-                            vol_details = {
-                                "short_term_vol": (
-                                    np.std(closes[-vol_short:])
-                                    / np.mean(closes[-vol_short:])
-                                    if len(closes) >= vol_short
-                                    else np.nan
-                                ),
-                                "long_term_vol": (
-                                    np.std(closes[-vol_long:])
-                                    / np.mean(closes[-vol_long:])
-                                    if len(closes) >= vol_long
-                                    else np.nan
-                                ),
-                            }
-                            vol_details["volatility_ratio"] = (
-                                vol_details["short_term_vol"]
-                                / vol_details["long_term_vol"]
-                                if not np.isnan(vol_details["short_term_vol"])
-                                and not np.isnan(vol_details["long_term_vol"])
-                                and vol_details["long_term_vol"] != 0
-                                else np.nan
+                            # Calculate volatility with user parameters - USE SAME METHOD AS DASHBOARD
+                            vol_details = (
+                                TechnicalIndicators.calculate_volatility_details(
+                                    closes, vol_short, vol_long
+                                )
                             )
 
                             detailed_data.append(

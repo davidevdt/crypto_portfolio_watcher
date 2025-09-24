@@ -40,7 +40,7 @@ class BackgroundDataService:
         self.is_running = False
         self.task = None
 
-    async def start_background_process(self, refresh_interval_seconds: int = 300):
+    async def start_background_process(self, refresh_interval_seconds: int = 60):
         """Start the background data collection process.
 
         Args:
@@ -66,7 +66,10 @@ class BackgroundDataService:
 
     async def run_data_collection_cycle(self):
         """Run a complete data collection cycle using tracked assets."""
-        logger.info("Starting data collection cycle...")
+        cycle_start = datetime.now()
+        logger.info(
+            f"🔄 Starting data collection cycle at {cycle_start.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
 
         try:
             # First, synchronize tracked assets with current portfolios/watchlist (with retry logic)
@@ -80,6 +83,10 @@ class BackgroundDataService:
             symbols = [asset.symbol for asset in tracked_assets]
 
             if symbols:
+                logger.info(
+                    f"📊 Processing {len(symbols)} tracked symbols: {', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''}"
+                )
+
                 # Fetch current prices
                 await self.update_current_prices(symbols, tracked_assets)
 
@@ -92,14 +99,18 @@ class BackgroundDataService:
                 # Check for notification triggers
                 await self.check_notification_triggers(symbols)
 
+                cycle_duration = (datetime.now() - cycle_start).total_seconds()
                 logger.info(
-                    f"Data collection cycle completed for {len(symbols)} symbols"
+                    f"✅ Data collection cycle completed in {cycle_duration:.1f}s for {len(symbols)} symbols"
                 )
             else:
                 logger.info("No symbols to track")
 
         except Exception as e:
-            logger.error(f"Error in data collection cycle: {e}")
+            cycle_duration = (datetime.now() - cycle_start).total_seconds()
+            logger.error(
+                f"❌ Error in data collection cycle after {cycle_duration:.1f}s: {e}"
+            )
 
     def get_all_tracked_symbols(self) -> List[str]:
         """Get all symbols that need to be tracked."""
@@ -113,9 +124,21 @@ class BackgroundDataService:
     async def update_current_prices(
         self, symbols: List[str], tracked_assets: List[TrackedAsset]
     ):
-        """Fetch and cache current prices for symbols."""
+        """Fetch and cache current prices for symbols using smart provider selection."""
         try:
-            # Fetch current prices from exchanges
+            # Log provider preferences for debugging
+            provider_stats = {}
+            for tracked_asset in tracked_assets:
+                if tracked_asset.preferred_data_provider:
+                    provider = tracked_asset.preferred_data_provider
+                    if provider not in provider_stats:
+                        provider_stats[provider] = 0
+                    provider_stats[provider] += 1
+
+            if provider_stats:
+                logger.info(f"Provider preferences: {provider_stats}")
+
+            # Fetch current prices from exchanges using smart provider selection
             current_prices = await self.price_fetcher.get_current_prices(symbols)
 
             if current_prices:
@@ -128,248 +151,74 @@ class BackgroundDataService:
                         symbol, "price"
                     )
 
-                logger.info(f"Updated {len(current_prices)} current prices")
+                logger.info(
+                    f"Updated {len(current_prices)} current prices using smart provider selection"
+                )
 
         except Exception as e:
             logger.error(f"Error updating current prices: {e}")
 
+    async def get_realistic_start_date(self, symbol: str, session) -> datetime:
+        """Determine a realistic start date for historical data based on existing data."""
+        try:
+            # Check if we have any existing data for this symbol
+            earliest_data = (
+                session.query(HistoricalPrice)
+                .filter(
+                    HistoricalPrice.symbol == symbol,
+                    HistoricalPrice.interval == "1d",
+                )
+                .order_by(HistoricalPrice.date.asc())
+                .first()
+            )
+
+            if earliest_data:
+                # If we have data, start from a bit before our earliest point
+                buffer_days = 60  # Larger buffer to catch any missing early data
+                return earliest_data.date - timedelta(days=buffer_days)
+            else:
+                # No existing data - try aggressive approach to get maximum available data
+                # Start from early 2020 for most tokens to capture maximum possible data
+                aggressive_start = datetime(2020, 1, 1)
+
+                # For major tokens, go back even further
+                major_tokens = [
+                    "BTC",
+                    "ETH",
+                    "LTC",
+                    "XRP",
+                    "ADA",
+                    "DOT",
+                    "LINK",
+                    "BCH",
+                    "XLM",
+                    "DOGE",
+                ]
+                if symbol in major_tokens:
+                    return datetime(2017, 1, 1)  # Major tokens have longer history
+                else:
+                    # For newer tokens, still try from 2020 - exchanges will return what's available
+                    return aggressive_start
+
+        except Exception as e:
+            logger.warning(
+                f"Could not determine realistic start date for {symbol}: {e}"
+            )
+            # Fall back to conservative date for new tokens
+            return datetime(2023, 1, 1)
+
     async def update_historical_data(
         self, symbols: List[str], tracked_assets: List[TrackedAsset]
     ):
-        """Fetch and store historical data for charts and portfolio progress."""
+        """Fetch maximum historical data every 5 minutes with generous fixed windows."""
         try:
             with get_db_session_with_retry() as session:
-                end_date = datetime.now()
-
                 for symbol in symbols:
                     try:
-                        # Check if we need to update daily historical data
-                        latest_daily_data = (
-                            session.query(HistoricalPrice)
-                            .filter(
-                                HistoricalPrice.symbol == symbol,
-                                HistoricalPrice.interval == "1d",
-                            )
-                            .order_by(HistoricalPrice.date.desc())
-                            .first()
-                        )
-
-                        # Check for missing volume data in daily data
-                        volume_data_check = (
-                            session.query(HistoricalPrice)
-                            .filter(
-                                HistoricalPrice.symbol == symbol,
-                                HistoricalPrice.interval == "1d",
-                                HistoricalPrice.volume == 0,
-                            )
-                            .count()
-                        )
-
-                        total_data_points = (
-                            session.query(HistoricalPrice)
-                            .filter(
-                                HistoricalPrice.symbol == symbol,
-                                HistoricalPrice.interval == "1d",
-                            )
-                            .count()
-                        )
-
-                        missing_volume_ratio = (
-                            (volume_data_check / total_data_points)
-                            if total_data_points > 0
-                            else 0
-                        )
-
-                        # Check if we need to update hourly historical data
-                        latest_hourly_data = (
-                            session.query(HistoricalPrice)
-                            .filter(
-                                HistoricalPrice.symbol == symbol,
-                                HistoricalPrice.interval == "1h",
-                            )
-                            .order_by(HistoricalPrice.date.desc())
-                            .first()
-                        )
-
-                        # Check if we have sufficient historical data range (5 years = 1825 days)
-                        required_start_date = end_date - timedelta(days=1825)
-                        earliest_daily_data = (
-                            session.query(HistoricalPrice)
-                            .filter(
-                                HistoricalPrice.symbol == symbol,
-                                HistoricalPrice.interval == "1d",
-                            )
-                            .order_by(HistoricalPrice.date.asc())
-                            .first()
-                        )
-
-                        insufficient_historical_range = (
-                            not earliest_daily_data
-                            or earliest_daily_data.date.date()
-                            > required_start_date.date()
-                        )
-
-                        # Only fetch daily if we don't have recent data OR volume data is missing OR insufficient historical range
-                        needs_daily_update = (
-                            not latest_daily_data
-                            or latest_daily_data.date.date() < datetime.now().date()
-                            or missing_volume_ratio
-                            > 0.3  # Re-fetch if >30% of volume data is missing
-                            or insufficient_historical_range
-                        )  # Re-fetch if we don't have 5 years of data
-
-                        # Only fetch hourly if we don't have recent hourly data (within last 2 hours)
-                        needs_hourly_update = (
-                            not latest_hourly_data
-                            or latest_hourly_data.date
-                            < datetime.now() - timedelta(hours=2)
-                        )
-
-                        # Update daily data if needed
-                        if needs_daily_update:
-                            # Log reason for update
-                            if missing_volume_ratio > 0.3:
-                                logger.info(
-                                    f"Re-fetching {symbol} daily data due to missing volume data ({missing_volume_ratio:.1%} missing)"
-                                )
-                            if insufficient_historical_range:
-                                current_range_days = (
-                                    (
-                                        latest_daily_data.date.date()
-                                        - earliest_daily_data.date.date()
-                                    ).days
-                                    if earliest_daily_data and latest_daily_data
-                                    else 0
-                                )
-                                logger.info(
-                                    f"Re-fetching {symbol} daily data due to insufficient historical range (have {current_range_days} days, need 1825 days)"
-                                )
-
-                            # Fetch 5 years of daily data (needed for weekly/monthly 5-year charts and long-term analysis)
-                            # Due to API 1000-point limit, fetch in two chunks: older data first, then recent data
-                            full_start_date = end_date - timedelta(
-                                days=1825
-                            )  # 5 years = 1825 days
-
-                            all_historical_data = []
-
-                            # Chunk 1: Fetch older data (5 years ago to ~3 years ago, ~1000 points)
-                            chunk1_start = full_start_date
-                            chunk1_end = end_date - timedelta(
-                                days=825
-                            )  # Leave ~825 days for recent data
-
-                            try:
-                                logger.info(
-                                    f"Fetching older {symbol} data: {chunk1_start.strftime('%Y-%m-%d')} to {chunk1_end.strftime('%Y-%m-%d')}"
-                                )
-                                older_data = (
-                                    await self.price_fetcher.get_historical_data(
-                                        symbol, chunk1_start, chunk1_end, "1d"
-                                    )
-                                )
-                                if older_data:
-                                    all_historical_data.extend(older_data)
-                                    logger.info(
-                                        f"Got {len(older_data)} older data points for {symbol}"
-                                    )
-                            except Exception as e:
-                                logger.warning(
-                                    f"Could not fetch older data for {symbol}: {e}"
-                                )
-
-                            # Chunk 2: Fetch recent data (from where older data ends to now)
-                            chunk2_start = chunk1_end + timedelta(days=1)
-                            chunk2_end = end_date
-
-                            try:
-                                logger.info(
-                                    f"Fetching recent {symbol} data: {chunk2_start.strftime('%Y-%m-%d')} to {chunk2_end.strftime('%Y-%m-%d')}"
-                                )
-                                recent_data = (
-                                    await self.price_fetcher.get_historical_data(
-                                        symbol, chunk2_start, chunk2_end, "1d"
-                                    )
-                                )
-                                if recent_data:
-                                    all_historical_data.extend(recent_data)
-                                    logger.info(
-                                        f"Got {len(recent_data)} recent data points for {symbol}"
-                                    )
-                            except Exception as e:
-                                logger.warning(
-                                    f"Could not fetch recent data for {symbol}: {e}"
-                                )
-
-                            # Store all collected data
-                            if all_historical_data:
-                                self.store_historical_data(
-                                    session, symbol, all_historical_data, "1d"
-                                )
-                                logger.info(
-                                    f"Updated daily historical data for {symbol} ({len(all_historical_data)} total points)"
-                                )
-
-                        # Update hourly data if needed
-                        if needs_hourly_update:
-                            # Fetch 90 days of hourly data (needed for 1h and 4h timeframes in Asset Charts)
-                            # Due to API 1000-point limit, fetch in chunks if needed
-                            # 90 days = ~2160 hours, but APIs limit to ~1000 points
-
-                            all_hourly_data = []
-
-                            # Chunk 1: Most recent 30 days (priority for 1h timeframe)
-                            recent_start = end_date - timedelta(days=30)
-                            try:
-                                logger.info(
-                                    f"Fetching recent {symbol} hourly data: last 30 days"
-                                )
-                                recent_hourly = (
-                                    await self.price_fetcher.get_historical_data(
-                                        symbol, recent_start, end_date, "1h"
-                                    )
-                                )
-                                if recent_hourly:
-                                    all_hourly_data.extend(recent_hourly)
-                                    logger.info(
-                                        f"Got {len(recent_hourly)} recent hourly points for {symbol}"
-                                    )
-                            except Exception as e:
-                                logger.warning(
-                                    f"Could not fetch recent hourly data for {symbol}: {e}"
-                                )
-
-                            # Chunk 2: Older hourly data (for 4h timeframe coverage)
-                            older_start = end_date - timedelta(days=90)
-                            older_end = recent_start - timedelta(hours=1)
-
-                            try:
-                                logger.info(
-                                    f"Fetching older {symbol} hourly data: 30-90 days ago"
-                                )
-                                older_hourly = (
-                                    await self.price_fetcher.get_historical_data(
-                                        symbol, older_start, older_end, "1h"
-                                    )
-                                )
-                                if older_hourly:
-                                    all_hourly_data.extend(older_hourly)
-                                    logger.info(
-                                        f"Got {len(older_hourly)} older hourly points for {symbol}"
-                                    )
-                            except Exception as e:
-                                logger.warning(
-                                    f"Could not fetch older hourly data for {symbol}: {e}"
-                                )
-
-                            # Store all collected hourly data
-                            if all_hourly_data:
-                                self.store_historical_data(
-                                    session, symbol, all_hourly_data, "1h"
-                                )
-                                logger.info(
-                                    f"Updated hourly historical data for {symbol} ({len(all_hourly_data)} total points)"
-                                )
+                        # RECENT DATA APPROACH: Always fetch most recent data every cycle
+                        # Uses recent_only=True to get latest 1000 candles, not historical ranges
+                        logger.info(f"Fetching most recent available data for {symbol}")
+                        await self.fetch_maximum_available_data(symbol, session)
 
                         # Update tracked asset timestamp
                         self.portfolio_manager.update_tracked_asset_timestamp(
@@ -383,6 +232,110 @@ class BackgroundDataService:
 
         except Exception as e:
             logger.error(f"Error updating historical data: {e}")
+
+    async def fetch_maximum_available_data(self, symbol: str, session):
+        """Fetch most recent data points for any asset using smart provider selection and recent_only mode."""
+        try:
+            end_date = datetime.now()
+
+            # REQUEST MOST RECENT DATA POINTS using recent_only mode
+            # This ignores date ranges and gets the latest available data from exchanges
+            # Typically returns 1000 most recent candles ending at current time
+            daily_days = 1000  # Not used in recent_only mode, kept for logging
+            daily_start = end_date - timedelta(
+                days=daily_days
+            )  # Not used in recent_only mode
+
+            hourly_hours = 1000  # Not used in recent_only mode, kept for logging
+            hourly_start = end_date - timedelta(
+                hours=hourly_hours
+            )  # Not used in recent_only mode
+
+            logger.info(
+                f"Fetching most recent data for {symbol} (recent_only mode - gets latest ~1000 candles)"
+            )
+
+            # DAILY DATA - fetch most recent available
+            try:
+                daily_data = await self.price_fetcher.get_historical_data(
+                    symbol, daily_start, end_date, "1d", recent_only=True
+                )
+                if daily_data:
+                    self.replace_historical_data(session, symbol, daily_data, "1d")
+                    first_point = datetime.fromtimestamp(
+                        daily_data[0]["timestamp"] / 1000
+                    )
+                    last_point = datetime.fromtimestamp(
+                        daily_data[-1]["timestamp"] / 1000
+                    )
+                    data_age_hours = (end_date - last_point).total_seconds() / 3600
+                    logger.info(
+                        f"✅ {len(daily_data)} daily candles for {symbol} ({first_point.date()} to {last_point.date()}, age: {data_age_hours:.1f}h)"
+                    )
+            except Exception as e:
+                logger.warning(f"Could not fetch daily data for {symbol}: {e}")
+
+            # HOURLY DATA - fetch most recent available
+            try:
+                hourly_data = await self.price_fetcher.get_historical_data(
+                    symbol, hourly_start, end_date, "1h", recent_only=True
+                )
+                if hourly_data:
+                    self.replace_historical_data(session, symbol, hourly_data, "1h")
+                    last_point = datetime.fromtimestamp(
+                        hourly_data[-1]["timestamp"] / 1000
+                    )
+                    data_age_hours = (end_date - last_point).total_seconds() / 3600
+                    logger.info(
+                        f"✅ {len(hourly_data)} hourly candles for {symbol} (latest: {last_point}, age: {data_age_hours:.1f}h)"
+                    )
+            except Exception as e:
+                logger.warning(f"Could not fetch hourly data for {symbol}: {e}")
+
+        except Exception as e:
+            logger.error(f"Error fetching data for {symbol}: {e}")
+
+    def replace_historical_data(
+        self, session: Session, symbol: str, data: List[Dict], interval: str
+    ):
+        """Replace all historical data for symbol/interval to maintain constant database size."""
+        try:
+            # DELETE existing data for this symbol/interval
+            deleted_count = (
+                session.query(HistoricalPrice)
+                .filter(
+                    HistoricalPrice.symbol == symbol,
+                    HistoricalPrice.interval == interval,
+                )
+                .delete()
+            )
+
+            # INSERT all fresh data
+            stored_count = 0
+            for item in data:
+                timestamp = datetime.fromtimestamp(item["timestamp"] / 1000)
+                historical_price = HistoricalPrice(
+                    symbol=symbol,
+                    date=timestamp,
+                    open_price=item["open"],
+                    high_price=item["high"],
+                    low_price=item["low"],
+                    close_price=item["close"],
+                    price=item["close"],  # Backward compatibility
+                    volume=item.get("volume", 0),
+                    interval=interval,
+                )
+                session.add(historical_price)
+                stored_count += 1
+
+            session.commit()
+            logger.info(
+                f"Replaced {deleted_count} old with {stored_count} fresh {interval} candles for {symbol}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error replacing historical data for {symbol}: {e}")
+            session.rollback()
 
     def store_historical_data(
         self, session: Session, symbol: str, data: List[Dict], interval: str

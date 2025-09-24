@@ -6,9 +6,103 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-import time
 from datetime import datetime, timedelta
 from typing import Dict, List
+
+
+def get_24h_price_change(symbol: str, current_price: float, quantity: float):
+    """
+    Standardized 24h price change calculation used across all components.
+
+    Returns:
+        tuple: (change_24h_dollar, change_24h_pct)
+    """
+    if symbol in ["USDT", "USDC", "BUSD", "DAI", "USDD", "TUSD"]:
+        return 0.0, 0.0
+
+    try:
+        from database.models import get_session, HistoricalPrice
+
+        session = get_session()
+        now = datetime.now()
+
+        # Get the most recent price data to establish a baseline
+        latest_record = (
+            session.query(HistoricalPrice)
+            .filter(HistoricalPrice.symbol == symbol)
+            .order_by(HistoricalPrice.date.desc())
+            .first()
+        )
+
+        if not latest_record:
+            session.close()
+            return 0.0, 0.0
+
+        # If latest data is more than 2 days old, try live data fallback
+        if latest_record.date < now - timedelta(days=2):
+            session.close()
+            return _get_live_24h_change(symbol, current_price, quantity)
+
+        # Look for historical data at least 6 hours old to ensure meaningful comparison
+        yesterday_price_record = None
+        cutoff_time = now - timedelta(hours=6)
+
+        # Get the most recent price that's at least 6 hours old
+        yesterday_price_record = (
+            session.query(HistoricalPrice)
+            .filter(
+                HistoricalPrice.symbol == symbol, HistoricalPrice.date <= cutoff_time
+            )
+            .order_by(HistoricalPrice.date.desc())
+            .first()
+        )
+
+        session.close()
+
+        if yesterday_price_record:
+            yesterday_price = yesterday_price_record.price
+
+            # Don't calculate change if prices are identical (likely same data point)
+            if abs(current_price - yesterday_price) < 0.000001:
+                return 0.0, 0.0
+
+            change_24h_pct = ((current_price - yesterday_price) / yesterday_price) * 100
+            change_24h_dollar = quantity * (current_price - yesterday_price)
+            return change_24h_dollar, change_24h_pct
+        else:
+            # No historical data available - try live data as fallback
+            return _get_live_24h_change(symbol, current_price, quantity)
+
+    except Exception:
+        return 0.0, 0.0
+
+
+def _get_live_24h_change(symbol: str, current_price: float, quantity: float):
+    """Fallback to live data when historical data is insufficient"""
+    try:
+        import asyncio
+        from data_providers.data_fetcher import CryptoPriceFetcher
+
+        fetcher = CryptoPriceFetcher()
+        end_date = datetime.now()
+        start_date = end_date - timedelta(hours=25)
+
+        live_data = asyncio.run(
+            fetcher.get_historical_data(symbol, start_date, end_date, "1h")
+        )
+
+        if live_data and len(live_data) >= 2:
+            # Use data from 24 hours ago
+            yesterday_price = live_data[0]["close"]
+            change_24h_pct = ((current_price - yesterday_price) / yesterday_price) * 100
+            change_24h_dollar = quantity * (current_price - yesterday_price)
+            return change_24h_dollar, change_24h_pct
+        else:
+            return 0.0, 0.0
+    except Exception:
+        return 0.0, 0.0
+
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -47,78 +141,35 @@ def show_portfolio_24h_change(summary: Dict, selected_portfolio):
 
         session = get_session()
         yesterday = datetime.now() - timedelta(days=1)
-        portfolio_history_value = None
 
+        # Always use asset-based calculation for consistency with portfolio tables
+        # This ensures P&L section matches individual portfolio calculations
+
+        # Get assets for calculation
         if selected_portfolio == "all":
-            yesterday_records = (
-                session.query(PortfolioValueHistory)
-                .filter(
-                    PortfolioValueHistory.date >= yesterday - timedelta(hours=12),
-                    PortfolioValueHistory.date <= yesterday + timedelta(hours=12),
-                )
-                .all()
-            )
-            portfolio_history_value = (
-                sum(record.total_value for record in yesterday_records)
-                if yesterday_records
-                else None
-            )
+            assets = st.session_state.portfolio_manager.get_all_assets()
         else:
-            yesterday_record = (
-                session.query(PortfolioValueHistory)
-                .filter(
-                    PortfolioValueHistory.portfolio_id == selected_portfolio,
-                    PortfolioValueHistory.date >= yesterday - timedelta(hours=12),
-                    PortfolioValueHistory.date <= yesterday + timedelta(hours=12),
-                )
-                .first()
-            )
-            portfolio_history_value = (
-                yesterday_record.total_value if yesterday_record else None
+            assets = st.session_state.portfolio_manager.get_portfolio_assets(
+                selected_portfolio
             )
 
-        # If no portfolio history, calculate from individual asset price changes
-        if portfolio_history_value is None:
-            # Get assets for calculation
-            if selected_portfolio == "all":
-                assets = st.session_state.portfolio_manager.get_all_assets()
-            else:
-                assets = st.session_state.portfolio_manager.get_portfolio_assets(
-                    selected_portfolio
-                )
+        # Calculate total 24h change by summing individual asset changes
+        total_change_24h_dollar = 0
+        for asset in assets:
+            current_price = st.session_state.current_prices.get(
+                asset.symbol, asset.average_buy_price
+            )
+            asset_change_dollar, _ = get_24h_price_change(
+                asset.symbol, current_price, asset.quantity
+            )
+            total_change_24h_dollar += asset_change_dollar
 
-            # Calculate yesterday's portfolio value using historical prices
-            yesterday_portfolio_value = 0
-            for asset in assets:
-                # Get yesterday's price for this asset
-                yesterday_price_record = (
-                    session.query(HistoricalPrice)
-                    .filter(
-                        HistoricalPrice.symbol == asset.symbol,
-                        HistoricalPrice.interval == "1d",
-                        HistoricalPrice.date >= yesterday - timedelta(hours=12),
-                        HistoricalPrice.date <= yesterday + timedelta(hours=12),
-                    )
-                    .first()
-                )
-
-                if yesterday_price_record:
-                    yesterday_asset_value = (
-                        asset.quantity * yesterday_price_record.price
-                    )
-                    yesterday_portfolio_value += yesterday_asset_value
-                else:
-                    current_price = st.session_state.current_prices.get(
-                        asset.symbol, asset.average_buy_price
-                    )
-                    yesterday_portfolio_value += asset.quantity * current_price
-
-            portfolio_history_value = yesterday_portfolio_value
+        portfolio_history_value = current_value - total_change_24h_dollar
 
         session.close()
 
         if portfolio_history_value and portfolio_history_value > 0:
-            change_dollar = current_value - portfolio_history_value
+            change_dollar = total_change_24h_dollar
             change_pct = (change_dollar / portfolio_history_value) * 100
 
             color = "green" if change_dollar >= 0 else "red"
@@ -499,10 +550,18 @@ def show_portfolio_progress_chart(assets: List, selected_portfolio, summary: Dic
     # Time period selector
     col1, col2 = st.columns([1, 3])
     with col1:
+        # Calculate days since January 1st for Year To Date
+        from datetime import datetime
+
+        today = datetime.now()
+        jan_1 = datetime(today.year, 1, 1)
+        ytd_days = (today - jan_1).days + 1  # +1 to include today
+
         time_periods = {
             "Last 7 days": 7,
             "Last 30 days": 30,
             "Last 90 days": 90,
+            "Year To Date": ytd_days,
             "Last 365 days": 365,
             "Last 3 years": 1095,
             "Last 5 years": 1825,
@@ -1192,46 +1251,10 @@ def show_portfolio_assets_table(
             else 0
         )
 
-        # Calculate 24h change using real historical data
-        if symbol in ["USDT", "USDC", "BUSD", "DAI", "USDD", "TUSD"]:
-            # Stablecoins have no price change
-            change_24h_pct = 0.0
-            change_24h_dollar = 0.0
-        else:
-            # Get real 24h change from historical data
-            try:
-                from database.models import get_session, HistoricalPrice
-
-                session = get_session()
-                yesterday = datetime.now() - timedelta(days=1)
-
-                yesterday_price_record = (
-                    session.query(HistoricalPrice)
-                    .filter(
-                        HistoricalPrice.symbol == symbol,
-                        HistoricalPrice.interval == "1d",
-                        HistoricalPrice.date >= yesterday - timedelta(hours=12),
-                        HistoricalPrice.date <= yesterday + timedelta(hours=12),
-                    )
-                    .first()
-                )
-
-                session.close()
-
-                if yesterday_price_record:
-                    yesterday_price = yesterday_price_record.price
-                    change_24h_pct = (
-                        (current_price - yesterday_price) / yesterday_price
-                    ) * 100
-                    change_24h_dollar = current_value * (change_24h_pct / 100)
-                else:
-                    # No historical data available
-                    change_24h_pct = 0.0
-                    change_24h_dollar = 0.0
-            except Exception:
-                # Error getting historical data
-                change_24h_pct = 0.0
-                change_24h_dollar = 0.0
+        # Calculate 24h change using standardized function
+        change_24h_dollar, change_24h_pct = get_24h_price_change(
+            symbol, current_price, quantity
+        )
 
         assets_data.append(
             {
@@ -1239,12 +1262,9 @@ def show_portfolio_assets_table(
                 "Portfolio": portfolio_name,
                 "Current Price ($)": current_price,
                 "Quantity": format_smart_quantity(quantity),
-                "Avg Buy Price ($)": average_buy_price,
-                "Total Value ($)": current_value,  # NEW: Current Price * Quantity
-                "Total Spent ($)": quantity
-                * average_buy_price,  # NEW: Average Buy Price * Quantity
-                "Current Allocation (%)": current_allocation,
-                "Initial Allocation (%)": initial_allocation,
+                "Average Buy Price ($)": average_buy_price,
+                "Current Value ($)": current_value,
+                "Total Spent ($)": total_spent,
                 "24h Change ($)": change_24h_dollar,
                 "24h Change (%)": change_24h_pct,
                 "P&L ($)": pnl,
@@ -1274,7 +1294,39 @@ def show_portfolio_assets_table(
     styled_df = df.style.map(style_pnl, subset=["P&L ($)", "P&L (%)"]).map(
         style_24h_change, subset=["24h Change ($)", "24h Change (%)"]
     )
-    st.dataframe(styled_df, width="stretch")
+
+    # Configure column widths to fit page better
+    column_config = {
+        "Symbol": st.column_config.TextColumn("Symbol", width="small"),
+        "Portfolio": st.column_config.TextColumn("Portfolio", width="small"),
+        "Current Price ($)": st.column_config.NumberColumn(
+            "Price ($)", format="$%.2f", width="small"
+        ),
+        "Quantity": st.column_config.TextColumn("Quantity", width="small"),
+        "Average Buy Price ($)": st.column_config.NumberColumn(
+            "Avg Buy ($)", format="$%.2f", width="small"
+        ),
+        "Current Value ($)": st.column_config.NumberColumn(
+            "Value ($)", format="$%.2f", width="medium"
+        ),
+        "Total Spent ($)": st.column_config.NumberColumn(
+            "Spent ($)", format="$%.2f", width="medium"
+        ),
+        "24h Change ($)": st.column_config.NumberColumn(
+            "24h $", format="$%.2f", width="small"
+        ),
+        "24h Change (%)": st.column_config.NumberColumn(
+            "24h %", format="%.2f%%", width="small"
+        ),
+        "P&L ($)": st.column_config.NumberColumn(
+            "P&L ($)", format="$%.2f", width="medium"
+        ),
+        "P&L (%)": st.column_config.NumberColumn(
+            "P&L (%)", format="%.2f%%", width="small"
+        ),
+    }
+
+    st.dataframe(styled_df, use_container_width=True, column_config=column_config)
 
 
 def show_allocation_charts(assets: List, _: Dict, use_aggregated: bool = False):
@@ -1792,8 +1844,8 @@ def show_add_asset_form(selected_portfolio):
                             f"✅ Added {quantity:.6f} {symbol} to portfolio (Increased total wealth by ${quantity * buy_price:.2f})"
                         )
 
-                    # Properly refresh portfolio data and UI
-                    refresh_portfolio_data_after_operation()
+                    # Properly refresh portfolio data and UI, and fetch fresh data for the new asset
+                    refresh_portfolio_data_after_operation(trigger_data_update=True)
 
                     # Clear operation lock before rerun
                     set_operation_in_progress(operation_key, False)
@@ -2618,31 +2670,16 @@ def show_portfolios_summary_table(consistent_prices: Dict):
             change_24h_dollar = 0.0
 
             for asset in portfolio_assets:
-                if asset.symbol in ["USDT", "USDC", "BUSD", "DAI", "USDD", "TUSD"]:
-                    # Stablecoins have no price change
-                    continue
-
-                # Get current and yesterday's price
+                # Get current price
                 current_price = consistent_prices.get(
                     asset.symbol, asset.average_buy_price
                 )
 
-                yesterday_price_record = (
-                    session.query(HistoricalPrice)
-                    .filter(
-                        HistoricalPrice.symbol == asset.symbol,
-                        HistoricalPrice.interval == "1d",
-                        HistoricalPrice.date >= yesterday - timedelta(hours=12),
-                        HistoricalPrice.date <= yesterday + timedelta(hours=12),
-                    )
-                    .first()
+                # Use standardized 24h change calculation
+                asset_change_dollar, _ = get_24h_price_change(
+                    asset.symbol, current_price, asset.quantity
                 )
-
-                if yesterday_price_record:
-                    yesterday_price = yesterday_price_record.price
-                    price_change = current_price - yesterday_price
-                    asset_change_dollar = asset.quantity * price_change
-                    change_24h_dollar += asset_change_dollar
+                change_24h_dollar += asset_change_dollar
 
             # Calculate percentage change
             yesterday_portfolio_value = total_value - change_24h_dollar

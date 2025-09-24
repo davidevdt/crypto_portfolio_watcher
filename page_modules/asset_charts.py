@@ -33,6 +33,39 @@ def get_historical_data_from_db(
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
 
+        # First, check if we have sufficient data in the requested range
+        initial_count = (
+            session.query(HistoricalPrice)
+            .filter(
+                HistoricalPrice.symbol == symbol,
+                HistoricalPrice.interval == interval,
+                HistoricalPrice.date >= start_date,
+                HistoricalPrice.date <= end_date,
+            )
+            .count()
+        )
+
+        # If we have very few data points in the requested range, expand to get more historical data
+        if initial_count < 10:  # Less than 10 data points
+            # Try to get last available data regardless of date range
+            max_available_data = (
+                session.query(HistoricalPrice)
+                .filter(
+                    HistoricalPrice.symbol == symbol,
+                    HistoricalPrice.interval == interval,
+                )
+                .order_by(HistoricalPrice.date.desc())
+                .limit(min(days * 2, 500))
+                .all()
+            )
+
+            if max_available_data:
+                # Use the actual date range of available data
+                latest_date = max_available_data[0].date
+                earliest_date = max_available_data[-1].date
+                start_date = earliest_date
+                end_date = latest_date
+
         # Handle 4h aggregation from hourly data
         if interval == "4h":
             # Fetch hourly data for 4h aggregation
@@ -361,7 +394,7 @@ def get_historical_data_from_db(
 
 
 def fill_missing_dates(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
-    """Fill missing dates in OHLCV data using forward fill to prevent gaps in charts."""
+    """Return only real historical data - no artificial filling or gap completion."""
     try:
         if len(df) == 0:
             return df
@@ -377,42 +410,9 @@ def fill_missing_dates(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
         # Sort by date to ensure proper order
         df = df.sort_index()
 
-        # Create complete date range from start to end with detected frequency
-        start_date = df.index.min()
-        end_date = df.index.max()
-
-        # Auto-detect the data frequency from the existing data
-        if len(df) >= 2:
-            time_diff = df.index[1] - df.index[0]
-            if time_diff <= pd.Timedelta(hours=1):
-                freq = "h"  # Hourly data
-            elif time_diff <= pd.Timedelta(hours=4):
-                freq = "4h"  # 4-hourly data
-            else:
-                freq = "D"  # Daily data (default)
-        else:
-            freq = "D"  # Default to daily if we can't detect
-
-        complete_dates = pd.date_range(start=start_date, end=end_date, freq=freq)
-
-        # Reindex with complete date range and forward fill missing values
-        df_filled = df.reindex(complete_dates)
-
-        # Forward fill OHLCV data for missing dates
-        df_filled["close"] = df_filled["close"].ffill()
-        df_filled["open"] = df_filled["open"].fillna(df_filled["close"])
-        df_filled["high"] = df_filled["high"].fillna(df_filled["close"])
-        df_filled["low"] = df_filled["low"].fillna(df_filled["close"])
-        df_filled["volume"] = df_filled["volume"].fillna(
-            0
-        )  # Zero volume for missing days
-
-        # Fill any remaining NaN values at the beginning with backward fill
-        df_filled = df_filled.bfill()
-
-        filled_count = len(df_filled) - len(df)
-
-        return df_filled
+        # NO ARTIFICIAL FILLING - return only real data points
+        # This ensures charts show only actual historical candles, not artificial ones
+        return df
 
     except Exception as e:
         st.warning(f"Could not fill missing dates for {symbol}: {e}")
@@ -1073,83 +1073,67 @@ def show():
         )
         return
 
-    # Asset and timeframe selection
-    col1, col2, col3 = st.columns(3)
+    # Get values from sidebar (set in app.py navigation)
+    # Fallback to default values if sidebar hasn't been used yet
+    if hasattr(st.session_state, "sidebar_selected_symbol") and all_symbols:
+        selected_symbol = st.session_state.sidebar_selected_symbol
+        if selected_symbol not in all_symbols:
+            selected_symbol = all_symbols[0]
+    elif all_symbols:
+        selected_symbol = all_symbols[0]
+    else:
+        selected_symbol = None
 
-    with col1:
-        selected_symbol = st.selectbox("📊 Select Asset", all_symbols)
+    selected_timeframe = getattr(
+        st.session_state, "sidebar_selected_timeframe", "1 day"
+    )
+    selected_period = getattr(st.session_state, "sidebar_selected_period", "90 days")
 
-    with col2:
-        # Separate timeframe and period selection
-        timeframes = ["1 hour", "4 hours", "1 day", "1 week", "1 month"]
-        selected_timeframe = st.selectbox(
-            "⏰ Timeframe", timeframes, index=2
-        )  # Default to 1 day
+    # Period options (same as in sidebar)
+    period_options = {
+        "1 hour": {
+            "1 day": 1,
+            "3 days": 3,
+            "7 days": 7,
+            "14 days": 14,
+            "30 days": 30,
+        },
+        "4 hours": {
+            "3 days": 3,
+            "7 days": 7,
+            "14 days": 14,
+            "30 days": 30,
+            "60 days": 60,
+            "90 days": 90,
+        },
+        "1 day": {
+            "7 days": 7,
+            "30 days": 30,
+            "90 days": 90,
+            "6 months": 180,
+            "1 year": 365,
+            "3 years": 1095,
+            "5 years": 1825,
+        },
+        "1 week": {
+            "3 months": 90,
+            "6 months": 180,
+            "1 year": 365,
+            "2 years": 730,
+            "3 years": 1095,
+            "5 years": 1825,
+        },
+        "1 month": {
+            "6 months": 180,
+            "1 year": 365,
+            "2 years": 730,
+            "3 years": 1095,
+            "5 years": 1825,
+        },
+    }
 
-    with col3:
-        # Period options based on selected timeframe - Following instructions for max data per timeframe:
-        # 1h: 30 days max, 4h: 90 days max, 1d/1w/1M: 5 years max
-        period_options = {
-            "1 hour": {
-                "1 day": 1,
-                "3 days": 3,
-                "7 days": 7,
-                "14 days": 14,
-                "30 days": 30,
-            },
-            "4 hours": {
-                "3 days": 3,
-                "7 days": 7,
-                "14 days": 14,
-                "30 days": 30,
-                "60 days": 60,
-                "90 days": 90,
-            },
-            "1 day": {
-                "7 days": 7,
-                "30 days": 30,
-                "90 days": 90,
-                "6 months": 180,
-                "1 year": 365,
-                "3 years": 1095,
-                "5 years": 1825,
-            },
-            "1 week": {
-                "3 months": 90,
-                "6 months": 180,
-                "1 year": 365,
-                "2 years": 730,
-                "3 years": 1095,
-                "5 years": 1825,
-            },
-            "1 month": {
-                "6 months": 180,
-                "1 year": 365,
-                "2 years": 730,
-                "3 years": 1095,
-                "5 years": 1825,
-            },
-        }
-
-        available_periods = list(period_options[selected_timeframe].keys())
-        default_periods = {
-            "1 hour": "7 days",
-            "4 hours": "30 days",
-            "1 day": "90 days",
-            "1 week": "1 year",
-            "1 month": "2 years",
-        }
-
-        default_index = (
-            available_periods.index(default_periods[selected_timeframe])
-            if default_periods[selected_timeframe] in available_periods
-            else 0
-        )
-        selected_period = st.selectbox(
-            "📊 Period", available_periods, index=default_index
-        )
-
-        # Show explanation of the combination
+    # Show current selection info
+    if selected_symbol:
         explanation = {
             "1 hour": f"Shows {selected_period} of hourly candles",
             "4 hours": f"Shows {selected_period} of 4-hour candles",
@@ -1158,7 +1142,9 @@ def show():
             "1 month": f"Shows {selected_period} of monthly candles",
         }
 
-        st.caption(f"💡 {explanation[selected_timeframe]}")
+        st.info(
+            f"📊 **{selected_symbol}** | {explanation[selected_timeframe]} | Use sidebar to change selection"
+        )
 
     # Convert to interval format with proper mapping for each timeframe
     # For weekly and monthly, we use daily data and aggregate it
@@ -1195,7 +1181,38 @@ def show():
         ]
         for key in keys_to_remove:
             del st.session_state.historical_data[key]
-        st.success(f"Cleared cache for {selected_symbol} - all timeframes will reload")
+
+        # Trigger fresh data update from exchanges for this specific symbol
+        try:
+            from components.shared import trigger_fresh_data_update
+            import asyncio
+
+            st.info(f"📡 Fetching fresh data for {selected_symbol} from exchanges...")
+
+            # Run the async data update for this specific symbol
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    st.warning(
+                        "📡 Fresh data update scheduled - data will refresh automatically"
+                    )
+                else:
+                    asyncio.run(trigger_fresh_data_update([selected_symbol]))
+                    st.success(
+                        f"📡 Fresh data updated for {selected_symbol} from exchanges!"
+                    )
+            except RuntimeError:
+                # No event loop, create one
+                asyncio.run(trigger_fresh_data_update([selected_symbol]))
+                st.success(
+                    f"📡 Fresh data updated for {selected_symbol} from exchanges!"
+                )
+
+        except Exception as e:
+            st.warning(f"⚠️ Could not fetch fresh data from exchanges: {e}")
+            st.success(
+                f"🔄 Cleared cache for {selected_symbol} - chart will reload with stored data"
+            )
 
     # Implement the strategy from instructions:
     # Get historical data for the maximum possible period per timeframe,

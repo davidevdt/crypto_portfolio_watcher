@@ -4,4 +4,4 @@ CLAUDE.md
 backup* 
 venv 
 db_data/portfolio*
-
+ensure_complete_data.py 

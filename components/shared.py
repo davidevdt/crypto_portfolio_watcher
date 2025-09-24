@@ -2266,13 +2266,83 @@ def set_operation_in_progress(
     st.session_state[operation_key] = in_progress
 
 
-def refresh_portfolio_data_after_operation():
+async def trigger_fresh_data_update(symbols_to_update: List[str] = None):
+    """
+    Manually trigger fresh data updates for symbols from exchanges.
+    This simulates what the background service does but can be called on-demand.
+
+    Args:
+        symbols_to_update: List of symbols to update. If None, updates all tracked symbols.
+    """
+    try:
+        from services.background_data_service import BackgroundDataService
+
+        # Create background service instance
+        bg_service = BackgroundDataService()
+
+        if symbols_to_update is None:
+            # Get all tracked symbols
+            symbols_to_update = bg_service.get_all_tracked_symbols()
+
+        if not symbols_to_update:
+            return True
+
+        # Remove stablecoins from update list
+        symbols_to_update = [
+            s
+            for s in symbols_to_update
+            if s not in ["USDT", "USDC", "BUSD", "DAI", "USDD", "TUSD"]
+        ]
+
+        if not symbols_to_update:
+            return True
+
+        # Update current prices first
+        logger.info(
+            f"Triggering fresh price updates for {len(symbols_to_update)} symbols"
+        )
+        tracked_assets = bg_service.portfolio_manager.get_tracked_assets(
+            active_only=True
+        )
+        await bg_service.update_current_prices(symbols_to_update, tracked_assets)
+
+        # Update historical data for symbols that need it
+        logger.info(
+            f"Triggering fresh historical data updates for {len(symbols_to_update)} symbols"
+        )
+        await bg_service.update_historical_data(symbols_to_update, tracked_assets)
+
+        # Update portfolio values
+        bg_service.update_portfolio_values()
+
+        logger.info(
+            f"Successfully triggered fresh updates for {len(symbols_to_update)} symbols"
+        )
+        return True
+
+    except Exception as e:
+        logger.error(f"Error triggering fresh data update: {e}")
+        return False
+
+
+def trigger_manual_data_refresh():
+    """
+    Synchronous wrapper to trigger fresh data updates from the dashboard.
+    This is what gets called when users click refresh buttons.
+    """
+    return refresh_portfolio_data_after_operation(trigger_data_update=True)
+
+
+def refresh_portfolio_data_after_operation(trigger_data_update: bool = False):
     """
     Enhanced refresh function to address Streamlit state sync issues.
     This ensures the UI reflects the latest database state and prevents repeated operations.
 
     This function should be called after any database modification operation
     (add_asset, update_asset, delete_asset, etc.) to ensure the UI stays in sync.
+
+    Args:
+        trigger_data_update: If True, also triggers fresh data fetching from exchanges
     """
     try:
         # STEP 1: Force complete session state cache clear
@@ -2337,6 +2407,35 @@ def refresh_portfolio_data_after_operation():
                     st.info(f"🔧 Debug: Synced tracked assets with background service")
             except Exception as sync_error:
                 logger.warning(f"Could not sync tracked assets: {sync_error}")
+
+            # Trigger fresh data update if requested
+            if trigger_data_update:
+                try:
+                    import asyncio
+
+                    # Run the async data update
+                    symbols_to_update = get_all_tracking_symbols()
+                    if symbols_to_update:
+                        # Run in new event loop if none exists
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                # Can't run in already running loop, schedule for later
+                                st.info("📡 Fresh data update scheduled...")
+                            else:
+                                asyncio.run(
+                                    trigger_fresh_data_update(symbols_to_update)
+                                )
+                                st.success("📡 Fresh data updated from exchanges!")
+                        except RuntimeError:
+                            # No event loop, create one
+                            asyncio.run(trigger_fresh_data_update(symbols_to_update))
+                            st.success("📡 Fresh data updated from exchanges!")
+                except Exception as data_error:
+                    logger.warning(f"Could not trigger fresh data update: {data_error}")
+                    st.warning(
+                        "⚠️ Could not fetch fresh data from exchanges, using cached data"
+                    )
 
         # STEP 3: Add operation completion marker to prevent repeated operations
         operation_marker_key = f"operation_completed_{datetime.now().timestamp()}"

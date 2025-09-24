@@ -22,15 +22,7 @@ Base = declarative_base()
 
 
 class Portfolio(Base):
-    """
-    Portfolio model representing a collection of cryptocurrency assets.
-
-    Attributes:
-        id: Primary key
-        name: Unique portfolio name
-        created_at: Portfolio creation timestamp
-        assets: Related Asset objects
-    """
+    """Portfolio model representing a collection of cryptocurrency assets."""
 
     __tablename__ = "portfolios"
 
@@ -44,18 +36,7 @@ class Portfolio(Base):
 
 
 class Asset(Base):
-    """
-    Asset model representing a cryptocurrency holding within a portfolio.
-
-    Attributes:
-        id: Primary key
-        symbol: Cryptocurrency symbol (e.g., 'BTC', 'ETH')
-        quantity: Amount of cryptocurrency owned
-        average_buy_price: Average purchase price
-        total_spent: Total amount spent on this asset
-        portfolio_id: Foreign key to Portfolio
-        created_at, updated_at: Timestamps
-    """
+    """Asset model representing a cryptocurrency holding within a portfolio."""
 
     __tablename__ = "assets"
 
@@ -78,19 +59,7 @@ class Asset(Base):
 
 
 class Transaction(Base):
-    """
-    Transaction model recording buy/sell operations for assets.
-
-    Attributes:
-        id: Primary key
-        asset_id: Foreign key to Asset
-        transaction_type: 'buy' or 'sell'
-        quantity: Amount transacted
-        price: Price per unit
-        total_value: Total transaction value
-        timestamp: When transaction occurred
-        notes: Optional transaction notes
-    """
+    """Transaction model recording buy/sell operations for assets."""
 
     __tablename__ = "transactions"
 
@@ -107,7 +76,7 @@ class Transaction(Base):
 
 
 class TrackedAsset(Base):
-    """Central table to track all assets that need price/data updates"""
+    """Central table to track all assets that need price/data updates."""
 
     __tablename__ = "tracked_assets"
 
@@ -119,11 +88,26 @@ class TrackedAsset(Base):
     last_historical_update = Column(
         DateTime, nullable=True
     )  # Last historical data fetch
+
+    # Data provider tracking
+    preferred_data_provider = Column(
+        String(20), nullable=True
+    )  # 'BinanceProvider', 'BybitProvider', etc.
+    provider_success_count = Column(
+        Integer, default=0
+    )  # How many times preferred provider succeeded
+    provider_fail_count = Column(
+        Integer, default=0
+    )  # How many times preferred provider failed
+    last_provider_success = Column(
+        DateTime, nullable=True
+    )  # Last time preferred provider worked
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def __repr__(self):
-        return f"<TrackedAsset(symbol='{self.symbol}', source='{self.source}', active={self.is_active})>"
+        return f"<TrackedAsset(symbol='{self.symbol}', source='{self.source}', active={self.is_active}, provider='{self.preferred_data_provider}')>"
 
 
 class Watchlist(Base):
@@ -160,16 +144,6 @@ class UserSettings(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class PricingData(Base):
-    __tablename__ = "pricing_data"
-
-    id = Column(Integer, primary_key=True)
-    symbol = Column(String(20), nullable=False)
-    price = Column(Float, nullable=False)
-    volume_24h = Column(Float)
-    timestamp = Column(DateTime, default=datetime.utcnow)
-
-
 class TakeProfitLevel(Base):
     __tablename__ = "take_profit_levels"
 
@@ -202,7 +176,7 @@ class CachedPrice(Base):
 
 
 class HistoricalPrice(Base):
-    """Store historical price data for portfolio value calculations"""
+    """Store historical price data for portfolio value calculations."""
 
     __tablename__ = "historical_prices"
 
@@ -226,7 +200,7 @@ class HistoricalPrice(Base):
 
 
 class PortfolioValueHistory(Base):
-    """Store calculated portfolio values over time"""
+    """Store calculated portfolio values over time."""
 
     __tablename__ = "portfolio_value_history"
 
@@ -246,7 +220,7 @@ class PortfolioValueHistory(Base):
 
 
 class AlertHistory(Base):
-    """Store alert history and notifications"""
+    """Store alert history and notifications."""
 
     __tablename__ = "alert_history"
 
@@ -269,7 +243,7 @@ class AlertHistory(Base):
 
 
 class NotificationSettings(Base):
-    """Enhanced notification settings storage"""
+    """Enhanced notification settings storage."""
 
     __tablename__ = "notification_settings"
 
@@ -304,7 +278,7 @@ class NotificationSettings(Base):
 
 
 class TechnicalIndicatorCache(Base):
-    """Cache calculated technical indicators"""
+    """Cache calculated technical indicators."""
 
     __tablename__ = "technical_indicator_cache"
 
@@ -481,3 +455,65 @@ def get_session():
     engine = get_engine()
     Session = sessionmaker(bind=engine)
     return Session()
+
+
+def migrate_tracked_assets():
+    """Initialize new provider tracking columns for existing TrackedAsset records."""
+    try:
+        # Use a fresh engine to avoid recursion issues
+        engine = get_engine()
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
+        # Check if the table and columns exist
+        from sqlalchemy import inspect
+
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+
+        if "tracked_assets" not in tables:
+            logger.info("TrackedAsset table doesn't exist yet, skipping migration")
+            session.close()
+            return
+
+        columns = [col["name"] for col in inspector.get_columns("tracked_assets")]
+        if "preferred_data_provider" not in columns:
+            logger.info("Provider tracking columns don't exist yet, skipping migration")
+            session.close()
+            return
+
+        # Find TrackedAsset records with NULL provider tracking fields that need initialization
+        assets_to_update = (
+            session.query(TrackedAsset)
+            .filter(TrackedAsset.provider_success_count == None)
+            .all()
+        )
+
+        if assets_to_update:
+            logger.info(
+                f"Initializing provider tracking for {len(assets_to_update)} tracked assets"
+            )
+
+            for asset in assets_to_update:
+                # Initialize new columns with default values
+                if asset.provider_success_count is None:
+                    asset.provider_success_count = 0
+                if asset.provider_fail_count is None:
+                    asset.provider_fail_count = 0
+                # preferred_data_provider and last_provider_success remain None until first success
+
+            session.commit()
+            logger.info("Successfully initialized provider tracking columns")
+        else:
+            logger.info("All tracked assets already have provider tracking initialized")
+
+        session.close()
+
+    except Exception as e:
+        logger.warning(f"Could not migrate tracked assets: {e}")
+        try:
+            session.close()
+        except:
+            pass

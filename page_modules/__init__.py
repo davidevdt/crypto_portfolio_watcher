@@ -10,6 +10,7 @@ from . import (
     take_profit_levels,
     watchlist,
     settings,
+    data_providers,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "take_profit_levels",
     "watchlist",
     "settings",
+    "data_providers",
 ]

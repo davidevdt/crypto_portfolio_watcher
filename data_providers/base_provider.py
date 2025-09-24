@@ -45,6 +45,7 @@ class CryptoDataProvider(ABC):
         start_date: datetime.datetime,
         end_date: datetime.datetime,
         interval: str,
+        recent_only: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Get historical price data for a cryptocurrency.
@@ -54,6 +55,8 @@ class CryptoDataProvider(ABC):
             start_date (datetime.datetime): The start date for the historical data.
             end_date (datetime.datetime): The end date for the historical data.
             interval (str): The time interval for data points (e.g., '1m', '1h', '1d').
+            recent_only (bool): If True, ignore date parameters and fetch only the most
+                recent data points available from the exchange (typically 1000 candles).
 
         Returns:
             List[Dict[str, Any]]: A list of dictionaries with keys 'timestamp', 'open',
