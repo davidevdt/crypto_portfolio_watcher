@@ -1961,12 +1961,24 @@ def setup_clean_auto_refresh():
         )
 
 
+def setup_html_auto_refresh():
+    """Setup simple HTML meta refresh for auto-refresh."""
+    if not st.session_state.settings.get("auto_refresh", True):
+        return
+
+    refresh_interval = st.session_state.settings.get("refresh_interval", 300)
+
+    # Use HTML meta refresh - most reliable method
+    meta_refresh = f'<meta http-equiv="refresh" content="{refresh_interval}">'
+    st.markdown(meta_refresh, unsafe_allow_html=True)
+
+
 def create_auto_refresh_mechanism():
     """Create a more reliable auto-refresh mechanism using time-based approach."""
     if not st.session_state.settings.get("auto_refresh", True):
         return
 
-    refresh_interval = st.session_state.settings.get("refresh_interval", 60)
+    refresh_interval = st.session_state.settings.get("refresh_interval", 300)
 
     # Use a simple time-based approach that works every time the page is accessed
     current_time = datetime.now()
@@ -1983,34 +1995,13 @@ def create_auto_refresh_mechanism():
 
     # Auto-refresh condition: enough time has passed
     if time_since_refresh >= refresh_interval:
-        st.sidebar.markdown("🔄 **AUTO-REFRESHING NOW...**")
-
-        # Refresh data
+        # Refresh data silently
         success = smart_price_refresh(force_refresh=True)
 
         if success:
-            new_price_count = (
-                len(st.session_state.current_prices)
-                if st.session_state.current_prices
-                else 0
-            )
             st.session_state.last_successful_refresh = current_time
-
-            st.sidebar.success(
-                f"✅ Refreshed {new_price_count} prices at {current_time.strftime('%H:%M:%S')}"
-            )
-
             # Force a rerun to show updated data
-            time.sleep(0.1)  # Small delay to ensure data is processed
             st.rerun()
-        else:
-            st.sidebar.warning("⚠️ Auto-refresh failed")
-
-    else:
-        # Show countdown
-        remaining = refresh_interval - time_since_refresh
-        if remaining <= 10:
-            st.sidebar.info(f"🔄 Auto-refresh in {remaining:.0f}s")
 
 
 @contextmanager
@@ -2040,8 +2031,8 @@ def poll_database_continuously():
                 smart_price_refresh(force_refresh=True)
                 logger.info("Initial database data loaded to session state")
 
-            # Use HTML meta refresh with 5-minute default interval
-            setup_clean_auto_refresh()
+            # Use HTML meta refresh for reliable auto-refresh
+            setup_html_auto_refresh()
 
     except Exception as e:
         logger.error(f"Error in continuous database polling: {e}")
