@@ -1261,7 +1261,7 @@ def show_portfolio_assets_table(
                 "Symbol": symbol,
                 "Portfolio": portfolio_name,
                 "Current Price ($)": current_price,
-                "Quantity": format_smart_quantity(quantity),
+                "Quantity": quantity,
                 "Average Buy Price ($)": average_buy_price,
                 "Current Value ($)": current_value,
                 "Total Spent ($)": total_spent,
@@ -1300,29 +1300,31 @@ def show_portfolio_assets_table(
         "Symbol": st.column_config.TextColumn("Symbol", width="small"),
         "Portfolio": st.column_config.TextColumn("Portfolio", width="small"),
         "Current Price ($)": st.column_config.NumberColumn(
-            "Price ($)", format="$%.2f", width="small"
+            "Price ($)", format="%.2f", width="small"
         ),
-        "Quantity": st.column_config.TextColumn("Quantity", width="small"),
+        "Quantity": st.column_config.NumberColumn(
+            "Quantity", format="%.5f", width="small"
+        ),
         "Average Buy Price ($)": st.column_config.NumberColumn(
-            "Avg Buy ($)", format="$%.2f", width="small"
+            "Avg Buy ($)", format="%.2f", width="small"
         ),
         "Current Value ($)": st.column_config.NumberColumn(
-            "Value ($)", format="$%.2f", width="medium"
+            "Value ($)", format="%.2f", width="medium"
         ),
         "Total Spent ($)": st.column_config.NumberColumn(
-            "Spent ($)", format="$%.2f", width="medium"
+            "Spent ($)", format="%.2f", width="medium"
         ),
         "24h Change ($)": st.column_config.NumberColumn(
-            "24h $", format="$%.2f", width="small"
+            "24h $", format="%.2f", width="small"
         ),
         "24h Change (%)": st.column_config.NumberColumn(
-            "24h %", format="%.2f%%", width="small"
+            "24h %", format="%.2f", width="small"
         ),
         "P&L ($)": st.column_config.NumberColumn(
-            "P&L ($)", format="$%.2f", width="medium"
+            "P&L ($)", format="%.2f", width="medium"
         ),
         "P&L (%)": st.column_config.NumberColumn(
-            "P&L (%)", format="%.2f%%", width="small"
+            "P&L (%)", format="%.2f", width="small"
         ),
     }
 
